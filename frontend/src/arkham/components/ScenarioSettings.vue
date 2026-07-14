@@ -130,14 +130,21 @@ const activeSettings = computed(() => {
     return true
   })
 })
+
+// When a scenario has no standalone settings to configure, there's nothing for
+// the player to do here, so skip the screen entirely by auto-submitting.
+const submitted = ref(false)
+watch(activeSettings, (settings) => {
+  if (settings.length === 0 && !submitted.value) {
+    submitted.value = true
+    submit()
+  }
+}, { immediate: true })
 </script>
 
 <template>
-  <div class="container scroll-container">
+  <div v-if="activeSettings.length > 0" class="container scroll-container">
     <h2>{{ $t('scenarioSettings.title') }}</h2>
-    <div v-if="activeSettings.length == 0">
-      <p>{{ $t('scenarioSettings.noSettings') }}</p>
-    </div>
     <div v-for="setting in activeSettings" :key="setting.key">
       <ScenarioSetting :setting="setting" :scenario="scenario" :game="game" :playerId="playerId" />
     </div>
@@ -207,7 +214,7 @@ input[type=radio] + label {
 }
 
 input[type=radio]:checked + label {
-  background: #6E8640;
+  background: var(--button-1);
 }
 
 input[type=checkbox] {
@@ -224,25 +231,25 @@ input[type=checkbox] + label {
   }
 
   &.invert {
-    background: #6E8640;
+    background: var(--button-1);
     &:hover {
-      background: #6E8640;
+      background: var(--button-1);
     }
   }
   border-color: #ddd;
 }
 
 input[type=checkbox]:checked + label {
-  background: #6E8640;
+  background: var(--button-1);
   &.invert {
     background-color: hsl(80, 5%, 39%);
   }
 }
 
 .invert[type=checkbox] + label {
-    background: #6E8640;
+    background: var(--button-1);
     &:hover {
-      background: #6E8640;
+      background: var(--button-1);
     }
 }
 

@@ -62,14 +62,9 @@ getStartingResources a = do
 getSkillValue :: (HasGame m, Tracing m) => SkillType -> InvestigatorId -> m Int
 getSkillValue st iid = do
   mods <- getModifiers iid
-  let
-    fld =
-      case st of
-        SkillWillpower -> InvestigatorBaseWillpower
-        SkillIntellect -> InvestigatorBaseIntellect
-        SkillCombat -> InvestigatorBaseCombat
-        SkillAgility -> InvestigatorBaseAgility
-  base <- field fld iid
+  -- honor BaseSkillOf/BaseSkill overrides (e.g. Shattered Self, Monstrous Transformation)
+  -- rather than reading the raw base field, so skill-combine effects (Lockpicks, Enchant Weapon) see them
+  base <- baseSkillValueFor st Nothing iid
   let canBeIncreased = SkillCannotBeIncreased st `notElem` mods
   x <-
     if canBeIncreased
@@ -183,6 +178,14 @@ getHandSize (asId -> iid) = do
   applyModifier _ _ n = n
   applyMaxModifier (MaxHandSize m) n = min m n
   applyMaxModifier _ n = n
+
+getStartingHandSize :: (HasGame m, ToId investigator InvestigatorId) => investigator -> m Int
+getStartingHandSize (asId -> iid) = do
+  modifiers <- getModifiers iid
+  pure $ max 0 $ foldr applyModifier 5 modifiers
+ where
+  applyModifier (StartingHand m) n = n + m
+  applyModifier _ n = n
 
 getExcessInHandCount
   :: (HasGame m, Tracing m, ToId investigator InvestigatorId) => investigator -> m Int
@@ -741,6 +744,23 @@ getAsIfInHandCardsFor forPlay iid = do
             (filter modifiersPermitPlayOfDeck (zip deck [0 :: Int ..]))
       NotForPlay -> []
   pure $ playableFromOutOfHand <> cardsAddedViaModifiers
+
+-- | Cards to load as in-hand effect entities (see 'preloadEntities'). Unlike
+-- 'getAsIfInHandCardsFor', this is agnostic to ForPlay/NotForPlay: a card that
+-- is only "as if in hand for play" (e.g. an event stashed under Stick to the
+-- Plan or Backpack) must still have its in-hand effects ('cdCardInHandEffects')
+-- applied -- otherwise e.g. Marksmanship(1)'s targeting modifier never fires
+-- while it sits under Stick to the Plan. Cards merely playable from
+-- discard/deck are deliberately excluded; those load as their own entities.
+getAsIfInHandEffectCards :: (HasCallStack, HasGame m) => InvestigatorId -> m [Card]
+getAsIfInHandEffectCards iid = do
+  isSkillTest <- isJust <$> getSkillTest
+  modifiers <- getModifiers (InvestigatorTarget iid)
+  modifiers & mapMaybeM \case
+    AsIfInHand c -> pure $ Just c
+    AsIfInHandFor _ c -> Just <$> getCard c
+    CanCommitToSkillTestsAsIfInHand c | isSkillTest -> pure $ Just c
+    _ -> pure Nothing
 
 matchWho
   :: (HasGame m, Tracing m)

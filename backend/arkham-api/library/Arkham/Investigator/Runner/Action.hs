@@ -71,6 +71,7 @@ import Arkham.Helpers.Action (
   getActionsWith,
   getAdditionalActions,
   getCanAfford,
+  longestUniqueStreak,
  )
 import Arkham.Helpers.Card (
   cardIsFast',
@@ -157,6 +158,7 @@ import Arkham.Message.Lifted.Choose qualified as Choose
 import Arkham.Message.Lifted.Move (moveTo, moveToEdit)
 import Arkham.Modifier
 import Arkham.Modifier qualified as Modifier
+import Arkham.Modifier.Builder (runCachedQueryT)
 import Arkham.Movement
 import Arkham.Phase
 import Arkham.Placement
@@ -240,21 +242,27 @@ handleTakeResources a@InvestigatorAttrs{..} iid n source = do
   beforeWindowMsg <- checkWhen $ Window.PerformAction iid #resource
   afterWindowMsg <- checkAfter $ Window.PerformAction iid #resource
   canGain <- can.gain.resources (sourceToFromSource source) iid
+  modifiers' <- getModifiers iid
 
   when canGain do
     pushAll
-      [ BeginAction
-      , beforeWindowMsg
-      , whenActivateAbilityWindow
-      , TakeActions iid [#resource] (ActionCost 1)
-      , Will (CheckAttackOfOpportunity iid False Nothing)
-      , CheckAttackOfOpportunity iid False Nothing
-      , TakeResources iid n source False
-      , afterWindowMsg
-      , afterActivateAbilityWindow
-      , FinishAction
-      , TakenActions iid [#resource]
-      ]
+      $ [ BeginAction
+        , beforeWindowMsg
+        , whenActivateAbilityWindow
+        , TakeActions iid [#resource] (ActionCost 1)
+        ]
+      <> [ Will (CheckAttackOfOpportunity iid False Nothing)
+         | ActionDoesNotCauseAttacksOfOpportunity #resource `notElem` modifiers'
+         ]
+      <> [ CheckAttackOfOpportunity iid False Nothing
+         | ActionDoesNotCauseAttacksOfOpportunity #resource `notElem` modifiers'
+         ]
+      <> [ TakeResources iid n source False
+         , afterWindowMsg
+         , afterActivateAbilityWindow
+         , FinishAction
+         , TakenActions iid [#resource]
+         ]
   pure a
 
 handleTakeResourcesV2 a@InvestigatorAttrs{..} iid n source msg = do
@@ -379,7 +387,6 @@ handleTakenActions a@InvestigatorAttrs{..} iid actions = do
   let previous = fromMaybe [] $ lastMay investigatorActionsPerformed
   let duplicated = actions `List.intersect` previous
   let streak = longestUniqueStreak (actions : reverse investigatorActionsPerformed)
-  let streakTypes = pickSDR streak
 
   when (notNull duplicated)
     $ pushM
@@ -388,7 +395,7 @@ handleTakenActions a@InvestigatorAttrs{..} iid actions = do
   when (length streak > 1)
     $ pushM
     $ checkWindows
-      [mkAfter (Window.PerformedDifferentTypesOfActionsInARow iid (length streak) streakTypes)]
+      [mkAfter (Window.PerformedDifferentTypesOfActionsInARow iid (length streak) streak)]
 
   when (#parley `elem` actions && #parley `notElem` previous)
     $ pushM
@@ -413,16 +420,26 @@ handlePerformedActions a@InvestigatorAttrs{..} iid actions = do
 handlePlayerWindow a@InvestigatorAttrs{..} iid additionalActions isAdditional immediate = do
   modifiers <- lift $ withSpan_ "getModifiers" $ getModifiers iid
   mTurnInvestigator <-
-    if AsIfTurn iid `elem` modifiers
-      then pure [iid]
+    if immediate
+      then pure []
       else maybeToList <$> selectOne TurnInvestigator
   let
     windows =
+      -- An "immediate" window is a granted/extra action (Carson Sinclair, Quick
+      -- Thinking, Swift Reflexes, "as if it were your turn" effects). It is NOT
+      -- actually your turn, so it presents only the NonFast action-taking window
+      -- (no DuringTurn, no FastPlayerWindow): basic actions and non-fast action
+      -- cards remain available, but "during your turn" Fast cards and fast/[free]
+      -- abilities -- including taking control of a key -- are not. See #4894.
       map (mkWhen . Window.DuringTurn) mTurnInvestigator
         <> [mkWhen Window.FastPlayerWindow | not immediate]
         <> [mkWhen Window.NonFast]
 
-  actions <- asIfTurn iid (getActions iid windows)
+  -- Run the whole action-enumeration pass under a single scoped query cache
+  -- (see 'runCachedQuery'): a PerformableAbility criterion (e.g. Eon Chart) would
+  -- otherwise re-enumerate every ability and re-run grid reachability uncached,
+  -- turning a large fast player window into a timeout on grid scenarios.
+  actions <- asIfTurn iid $ runCachedQueryT (getActions iid windows)
   anyForced <- anyM (isForcedAbility iid) actions
   if anyForced
     then do
@@ -447,10 +464,10 @@ handlePlayerWindow a@InvestigatorAttrs{..} iid additionalActions isAdditional im
         usesAction = not isAdditional
         drawCardsF = if usesAction then drawCardsAction else drawCards
         effectActions = flip mapMaybe additionalActions' $ \case
-          AdditionalAction _ _ (EffectAction tooltip effectId) ->
+          AdditionalAction _ _ (EffectAction t effectId) ->
             Just
               $ EffectActionButton
-                (Tooltip tooltip)
+                (Tooltip t)
                 effectId
                 [UseEffectAction iid effectId windows]
           _ -> Nothing
@@ -686,22 +703,3 @@ handleResolvedAbility a@InvestigatorAttrs{..} = do
                   _ -> u
             )
       )
-
-longestUniqueStreak :: Eq a => [[a]] -> [[a]]
-longestUniqueStreak = go []
- where
-  go acc [] = acc
-  go acc (xs : xss)
-    | sdrExists (xs : acc) = go (xs : acc) xss
-    | otherwise = acc
-
-sdrExists :: Eq a => [[a]] -> Bool
-sdrExists [] = True
-sdrExists (xs : rest) = any (\x -> sdrExists (map (filter (/= x)) rest)) xs
-
-pickSDR :: Eq a => [[a]] -> [a]
-pickSDR = fromMaybe [] . go
- where
-  go [] = Just []
-  go (xs : rest) = listToMaybe . catMaybes $
-    [fmap (x :) (go (map (filter (/= x)) rest)) | x <- xs]

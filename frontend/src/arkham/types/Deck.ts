@@ -2,20 +2,28 @@ import * as JsonDecoder from 'ts.data.json';
 import { investigatorClass } from '@/arkham/helpers';
 import { v2Optional } from '@/arkham/parser';
 
+export type DeckMeta = string | Record<string, unknown>
+
 interface Meta {
-  alternate_front: string
+  alternate_front?: string
+  card_pool?: string
+  [key: string]: unknown
 }
 
 export interface ArkhamDbDecklist {
   id: string
   url: string | null
-  meta?: Meta
+  meta?: DeckMeta
   name: string
   investigator_code: string
   investigator_name: string
   slots: {
     [key: string]: number
   }
+  sideSlots?: {
+    [key: string]: number
+  }
+  taboo_id?: number | null
 }
 
 
@@ -43,6 +51,7 @@ export function deckClass(deck: Deck) {
 export type DeckList = {
   investigator_code: string;
   slots: Record<string, number>;
+  sideSlots?: Record<string, number>;
   meta?: string
   taboo_id?: number
 }
@@ -58,6 +67,7 @@ export const deckListDecoder = JsonDecoder.object<DeckList>(
   {
     investigator_code: JsonDecoder.string(),
     slots: JsonDecoder.record<number>(JsonDecoder.number(), 'Dict<cardcode, number'),
+    sideSlots: v2Optional(JsonDecoder.record<number>(JsonDecoder.number(), 'Dict<cardcode, number')),
     meta: v2Optional(JsonDecoder.string()),
     taboo_id: v2Optional(JsonDecoder.number()),
   },

@@ -128,6 +128,8 @@ allInvestigators =
       , SomeInvestigatorCard alessandraZorzi
       , SomeInvestigatorCard kohakuNarukami
       , SomeInvestigatorCard hankSamson
+      , SomeInvestigatorCard hankSamsonResoluteAssistant
+      , SomeInvestigatorCard hankSamsonResoluteWarden
       , SomeInvestigatorCard marionTavares
       , SomeInvestigatorCard luciusGalloway
       , SomeInvestigatorCard agathaCrane_Seeker
@@ -224,6 +226,13 @@ becomeShatteredSelf (Investigator a) =
       , investigatorDiscarding = Nothing
       }
 
+shatteredSelfOriginalCardCode :: Investigator -> Maybe CardCode
+shatteredSelfOriginalCardCode (Investigator a) = case cast a of
+  Just (ShatteredSelf (_ `With` meta)) -> case fromJSON @Investigator meta.originalBody of
+    Success x -> Just $ investigatorCardCode $ toAttrs x
+    _ -> Nothing
+  Nothing -> Nothing
+
 returnFromShatteredSelf :: Investigator -> Investigator
 returnFromShatteredSelf = flip handleInvestigator \(ShatteredSelf (attrs `With` meta)) ->
   case fromJSON meta.originalBody of
@@ -235,10 +244,21 @@ returnFromShatteredSelf = flip handleInvestigator \(ShatteredSelf (attrs `With` 
         , investigatorPhysicalTrauma = investigatorPhysicalTrauma attrs
         , investigatorMentalTrauma = investigatorMentalTrauma attrs
         , investigatorTokens = investigatorTokens attrs
+        , investigatorPlacement = investigatorPlacement attrs
+        , investigatorMovement = investigatorMovement attrs
+        , investigatorPreviousLocation = investigatorPreviousLocation attrs
         , investigatorUsedAbilities = filter onlyCampaignAbilities (investigatorUsedAbilities a)
         , investigatorLog = investigatorLog a
         , investigatorKilled = investigatorKilled a
         , investigatorDrivenInsane = investigatorDrivenInsane a
+        , investigatorDeck = investigatorDeck attrs
+        , investigatorHand = investigatorHand attrs
+        , investigatorDiscard = investigatorDiscard attrs
+        , investigatorSlots = investigatorSlots attrs
+        , investigatorRemainingActions = investigatorRemainingActions attrs
+        , investigatorActionsTaken = investigatorActionsTaken attrs
+        , investigatorActionsPerformed = investigatorActionsPerformed attrs
+        , investigatorEndedTurn = investigatorEndedTurn attrs
         }
     _ -> error "The shattered self cannot be made whole again"
 

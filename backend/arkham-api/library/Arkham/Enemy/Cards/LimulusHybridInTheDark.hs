@@ -17,7 +17,7 @@ newtype LimulusHybridInTheDark = LimulusHybridInTheDark EnemyAttrs
   deriving newtype (Show, Eq, ToJSON, FromJSON, Entity)
 
 limulusHybridInTheDark :: EnemyCard LimulusHybridInTheDark
-limulusHybridInTheDark = enemy LimulusHybridInTheDark Cards.limulusHybridInTheDark (4, Static 5, 3) (2, 1)
+limulusHybridInTheDark = enemy LimulusHybridInTheDark Cards.limulusHybridInTheDark
 
 instance HasModifiersFor LimulusHybridInTheDark where
   getModifiersFor (LimulusHybridInTheDark a) = do
@@ -27,9 +27,9 @@ instance HasModifiersFor LimulusHybridInTheDark where
 instance HasAbilities LimulusHybridInTheDark where
   getAbilities (LimulusHybridInTheDark a) =
     extend a
-      [ restricted a 1 (isLight a)
+      [ restricted a 1 (isLight a <> youExist LeadInvestigator)
           $ SilentForcedAbility
-          $ oneOf [EnemyEnters #after Anywhere (be a), EnemySpawns #after Anywhere (be a)]
+          $ oneOf [EnemyEnters #when Anywhere (be a), EnemySpawns #when Anywhere (be a)]
       , mkAbility a 2 $ forced $ EnemyAttackedSuccessfully #after You (SourceWithTrait Melee) (be a)
       ]
 

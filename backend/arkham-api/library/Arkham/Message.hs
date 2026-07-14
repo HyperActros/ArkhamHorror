@@ -9,8 +9,8 @@ import Arkham.Message.Clue as X
 import Arkham.Message.Damage as X
 import Arkham.Message.Defeat as X
 import Arkham.Message.Doom as X
-import Arkham.Message.Engage as X
 import Arkham.Message.EnemyAttack as X
+import Arkham.Message.Engage as X
 import Arkham.Message.Evade as X
 import Arkham.Message.Exhaust as X
 import Arkham.Message.Fight as X
@@ -30,6 +30,7 @@ import Arkham.Strategy as X
 import Arkham.Text as X
 
 import Arkham.Ability.Types
+import Arkham.Achievement.Types (Achievement)
 import Arkham.Act.Sequence
 import Arkham.Action hiding (Explore)
 import Arkham.Action qualified as Action
@@ -58,8 +59,10 @@ import Arkham.DamageEffect
 import Arkham.Deck
 import Arkham.DeckBuilding.Adjustment
 import Arkham.Decklist.Type
+import Arkham.Difficulty
 import Arkham.Direction
 import Arkham.Discard
+import Arkham.Epic.Types (SharedKey)
 import Arkham.Discover
 import Arkham.Draw.Types
 import {-# SOURCE #-} Arkham.Effect.Types
@@ -67,12 +70,16 @@ import Arkham.Effect.Window
 import Arkham.EffectMetadata
 import Arkham.EncounterCard.Source
 import Arkham.Enemy.Creation
-import Arkham.Exhaust
 import {-# SOURCE #-} Arkham.Enemy.Types
 import Arkham.Evade.Types
+import Arkham.Ai.Focus (Focus)
+import Arkham.Ai.Orphans ()
+import Arkham.Ai.State (AiPlayerState)
 import Arkham.Exception
+import Arkham.Exhaust
 import Arkham.Field
 import Arkham.Fight.Types
+import Arkham.Game.Settings (AsIfRuling)
 import Arkham.Game.State
 import Arkham.Helpers
 import Arkham.History
@@ -85,7 +92,15 @@ import Arkham.Layout
 import Arkham.Location.FloodLevel
 import Arkham.Location.Grid
 import {-# SOURCE #-} Arkham.Location.Types
-import Arkham.Matcher hiding (AssetDefeated, DealtDamage, EnemyAttacks, EnemyEvaded, InvestigatorDefeated, RevealChaosToken)
+import Arkham.Matcher hiding (
+  AssetDefeated,
+  DealtDamage,
+  EnemyAttacks,
+  EnemyEvaded,
+  InvestigatorDefeated,
+  RevealChaosToken,
+ )
+import {-# SOURCE #-} Arkham.Modifier
 import Arkham.Movement
 import Arkham.Name
 import Arkham.Phase
@@ -143,6 +158,9 @@ messageType Explore {} = Just ExploreMessage
 messageType DealAssetDamageWithCheck {} = Just AssetDamageMessage
 messageType DealAssetDirectDamage {} = Just AssetDamageMessage
 messageType AssignAssetDamageWithCheck {} = Just AssetDamageMessage
+-- Deliberately NOT AssetDamageMessage: this only accumulates assigned damage; the
+-- real placement (and its amount) is the later AssignAssetDamageWithCheck, which is
+-- what getAssetDamageAmounts / healing previews must read.
 messageType (MoveWithSkillTest msg) = messageType msg
 messageType (MovedWithSkillTest _ msg) = messageType msg
 messageType (Do msg) = messageType msg
@@ -383,7 +401,8 @@ pattern FlipThis :: Target -> Message
 pattern FlipThis target <- Flip _ _ target
 
 pattern SuccessfulInvestigationWith :: InvestigatorId -> Target -> Message
-pattern SuccessfulInvestigationWith iid target <- Successful (Action.Investigate, _) iid _ target _
+pattern SuccessfulInvestigationWith iid target <-
+  SkillTestMessage (Successful_ (Action.Investigate, _) iid _ target _)
 
 pattern BeginSkillTest :: SkillTest -> Message
 pattern BeginSkillTest skillTest <- BeginSkillTestWithPreMessages' [] skillTest
@@ -413,6 +432,14 @@ instance AndThen EnemyAttackDetails where
 data ShuffleIn = ShuffleIn | DoNotShuffleIn
   deriving stock (Show, Ord, Eq, Generic, Data)
   deriving anyclass (ToJSON, FromJSON)
+
+data InitDeckAttrs = InitDeckAttrs
+  { initDeckInvestigator :: InvestigatorId
+  , initDeckUrl :: Maybe Text
+  , initDeckDecklist :: Maybe ArkhamDBDecklist
+  , initDeckDeck :: Deck PlayerCard
+  }
+  deriving stock (Show, Ord, Eq, Generic, Data)
 
 data GroupKey = HunterGroup | FailSkillTestGroup
   deriving stock (Show, Ord, Eq, Generic, Data)
@@ -453,6 +480,24 @@ data Message
   | ClearAbilityUse AbilityRef
   | UpdateGlobalSetting InvestigatorId SetGlobalSetting
   | UpdateCardSetting InvestigatorId CardCode SetCardSetting
+  | SetAsIfRuling AsIfRuling
+  | SetUltimatumsAndBoonsEnabled Bool
+  | -- | Ultimatum of The Scream: ban this ally for the rest of the campaign
+    RecordScreamedAlly CardCode
+  | -- | Above-the-table achievement earned; persisted per human player and
+    -- toasted by the API layer (the engine only announces it).
+    EarnAchievement Achievement
+  | -- | Checklist items completed toward a cross-playthrough achievement
+    -- (see 'achievementChecklist'); the API layer merges them into the
+    -- per-user progress row and awards the earn when the list is complete.
+    AchievementProgress Achievement [Text]
+  | -- AI seat configuration (mutates Settings.settingsAiPlayers)
+    RegisterAiPlayer PlayerId AiPlayerState
+  | SetAiFocusOverride PlayerId (Maybe Focus)
+  | AddAiPriority PlayerId Target
+  | RemoveAiPriority PlayerId Target
+  | SetAiEnabled PlayerId Bool
+  | SetAiResponseDelay PlayerId Int
   | SetLocationOffset LocationId Double Double
   | ResetLocationOffsets
   | SetAsIfAtIgnored InvestigatorId Bool
@@ -565,6 +610,11 @@ data Message
   | DealAssetDamageWithCheck AssetId Source Int Int Bool
   | DealAssetDirectDamage AssetId Source Int Int
   | AssignAssetDamageWithCheck AssetId Source Int Int Bool
+  | -- Accumulate assigned (but not yet placed) damage/horror on an asset so the
+    -- soaked amount is visible during deferred assignment, mirroring how an
+    -- investigator's assignedHealthDamage is shown before AssignDamage applies it.
+    -- The real tokens are placed (and this is cleared) by AssignAssetDamageWithCheck.
+    AssignAssetDamageDeferred AssetId Source Int Int
   | DamageMessage DamageMessage
   | DefeatMessage DefeatMessage
   | ExhaustMessage ExhaustMessage
@@ -727,6 +777,7 @@ data Message
   | FindEncounterCard InvestigatorId Target [ScenarioZone] CardMatcher FindEncounterCardStrategy
   | FinishedWithMulligan InvestigatorId
   | FocusCards [Card]
+  | HighlightCards [Card]
   | FocusChaosTokens [ChaosToken]
   | Force Message
   | FoundAndDrewEncounterCard InvestigatorId EncounterCardSource EncounterCard
@@ -758,7 +809,7 @@ data Message
   | InDiscard InvestigatorId Message -- Nothing uses this yet
   | InSearch Message
   | InHand InvestigatorId Message
-  | InitDeck InvestigatorId (Maybe Text) (Deck PlayerCard) -- used to initialize the deck for the campaign
+  | InitDeck InitDeckAttrs -- used to initialize the deck for the campaign
   | LoadSideDeck InvestigatorId [PlayerCard] -- used to initialize the side deck for the campaign
   | LoadDecklist PlayerId ArkhamDBDecklist
   | ReplaceInvestigator InvestigatorId ArkhamDBDecklist
@@ -857,6 +908,10 @@ data Message
   | PutOnBottomOfDeck InvestigatorId DeckSignifier Target
   | Record CampaignLogKey
   | RecordForInvestigator InvestigatorId CampaignLogKey
+  | -- | Adjust a per-investigator tally in that investigator's own campaign log
+    -- (e.g. Dark Matter "Memories"). Negative values cross off tallies; the
+    -- count never drops below zero.
+    IncrementRecordCountForInvestigator InvestigatorId CampaignLogKey Int
   | RecordCount CampaignLogKey Int
   | IncrementRecordCount CampaignLogKey Int
   | DecrementRecordCount CampaignLogKey Int
@@ -877,10 +932,11 @@ data Message
   | RemoveCardFromHand InvestigatorId CardId
   | RemoveCardFromSearch InvestigatorId CardId
   | RemoveDiscardFromGame InvestigatorId
-  | -- | Remove the entity identified by Target from play. The six entity-specific
-    -- back-compat pattern synonyms (RemoveAsset, RemoveEnemy, RemoveEvent,
-    -- RemoveSkill, RemoveTreachery, RemoveLocation) wrap this with the right
-    -- per-entity Target constructor.
+  | {- | Remove the entity identified by Target from play. The six entity-specific
+    back-compat pattern synonyms (RemoveAsset, RemoveEnemy, RemoveEvent,
+    RemoveSkill, RemoveTreachery, RemoveLocation) wrap this with the right
+    per-entity Target constructor.
+    -}
     Remove Target
   | RemoveFromDiscard InvestigatorId CardId
   | RemoveFromEncounterDiscard EncounterCard
@@ -1011,6 +1067,16 @@ data Message
   | ScenarioSpecific Text Value
   | CampaignSpecific Text Value
   | SetCampaignMeta Value
+  | {- | Append modifiers that apply to all investigators for the remainder of
+    the campaign. Handled generically by 'defaultCampaignRunner' so it works
+    regardless of which campaign the scenario is being played in.
+    -}
+    AddCampaignModifiersForAll [ModifierType]
+  | {- | Remove previously-added campaign-wide modifiers (see
+    'AddCampaignModifiersForAll'). Used when an effect that imposed them is
+    lifted for the remainder of the campaign.
+    -}
+    RemoveCampaignModifiersForAll [ModifierType]
   | DoStep Int Message
   | ForInvestigator InvestigatorId Message
   | ForInvestigators [InvestigatorId] Message
@@ -1081,15 +1147,25 @@ data Message
   | Simultaneously [Message]
   | -- Debug
     ClearQueue
+  | SetCardOwner CardId InvestigatorId
   | DebugAddToHand InvestigatorId CardId
+  | DebugCustomize InvestigatorId CardId
+  | DebugIncreaseCustomization InvestigatorId CardCode Customization [CustomizationChoice]
+  | SetScenarioDifficulty Difficulty
   | SetCampaignStep CampaignStep
   | CreateCard CardId CardCode
+  | -- Epic Multiplayer: mutate a shared counter on the owning event. These are
+    -- captured (not dispatched to a game entity) by the run loop when the game
+    -- belongs to an event; otherwise they are inert no-ops. See "Arkham.Epic".
+    SpendShared SharedKey Int
+  | RaiseShared SharedKey Int
   deriving stock (Show, Eq, Ord, Data)
 
--- | The fight cluster routes by 'Target' internally. Two public forms exist
--- per constructor: a generic @*Target@ form that matches any 'Target', and an
--- @*Enemy@ back-compat form that matches only @EnemyTarget eid@. Old call
--- sites that say @FightEnemy eid cf@ continue to compile unchanged.
+{- | The fight cluster routes by 'Target' internally. Two public forms exist
+per constructor: a generic @*Target@ form that matches any 'Target', and an
+@*Enemy@ back-compat form that matches only @EnemyTarget eid@. Old call
+sites that say @FightEnemy eid cf@ continue to compile unchanged.
+-}
 pattern FightTarget :: Target -> ChooseFight -> Message
 pattern FightTarget tgt cf = FightMessage (FightTarget_ tgt cf)
 
@@ -1111,16 +1187,19 @@ pattern FailedAttackEnemy iid eid = FightMessage (FailedAttackTarget_ iid (Enemy
 pattern ChooseFightEnemy :: ChooseFight -> Message
 pattern ChooseFightEnemy cf = FightMessage (ChooseFightEnemy_ cf)
 
--- | The evade cluster routes by 'Target' internally. Two public forms exist
--- per constructor: a generic @*Target@ form that matches any 'Target', and an
--- @*Enemy@/@Enemy*@ back-compat form that matches only @EnemyTarget eid@.
+{- | The evade cluster routes by 'Target' internally. Two public forms exist
+per constructor: a generic @*Target@ form that matches any 'Target', and an
+@*Enemy@/@Enemy*@ back-compat form that matches only @EnemyTarget eid@.
+-}
 pattern ChooseEvadeEnemy :: ChooseEvade -> Message
 pattern ChooseEvadeEnemy ce = EvadeMessage (ChooseEvadeEnemy_ ce)
 
-pattern TryEvadeTarget :: SkillTestId -> InvestigatorId -> Target -> Source -> Maybe Target -> SkillType -> Message
+pattern TryEvadeTarget
+  :: SkillTestId -> InvestigatorId -> Target -> Source -> Maybe Target -> SkillType -> Message
 pattern TryEvadeTarget sid iid tgt src mt st = EvadeMessage (TryEvadeTarget_ sid iid tgt src mt st)
 
-pattern EvadeTarget :: SkillTestId -> InvestigatorId -> Target -> Source -> Maybe Target -> SkillType -> Bool -> Message
+pattern EvadeTarget
+  :: SkillTestId -> InvestigatorId -> Target -> Source -> Maybe Target -> SkillType -> Bool -> Message
 pattern EvadeTarget sid iid tgt src mt st b = EvadeMessage (EvadeTarget_ sid iid tgt src mt st b)
 
 pattern EvadedTarget :: InvestigatorId -> Target -> Message
@@ -1132,11 +1211,15 @@ pattern ChosenEvadeTarget sid src tgt = EvadeMessage (ChosenEvadeTarget_ sid src
 pattern AfterEvadeTarget :: InvestigatorId -> Target -> Message
 pattern AfterEvadeTarget iid tgt = EvadeMessage (AfterEvadeTarget_ iid tgt)
 
-pattern TryEvadeEnemy :: SkillTestId -> InvestigatorId -> EnemyId -> Source -> Maybe Target -> SkillType -> Message
-pattern TryEvadeEnemy sid iid eid src mt st = EvadeMessage (TryEvadeTarget_ sid iid (EnemyTarget eid) src mt st)
+pattern TryEvadeEnemy
+  :: SkillTestId -> InvestigatorId -> EnemyId -> Source -> Maybe Target -> SkillType -> Message
+pattern TryEvadeEnemy sid iid eid src mt st =
+  EvadeMessage (TryEvadeTarget_ sid iid (EnemyTarget eid) src mt st)
 
-pattern EvadeEnemy :: SkillTestId -> InvestigatorId -> EnemyId -> Source -> Maybe Target -> SkillType -> Bool -> Message
-pattern EvadeEnemy sid iid eid src mt st b = EvadeMessage (EvadeTarget_ sid iid (EnemyTarget eid) src mt st b)
+pattern EvadeEnemy
+  :: SkillTestId -> InvestigatorId -> EnemyId -> Source -> Maybe Target -> SkillType -> Bool -> Message
+pattern EvadeEnemy sid iid eid src mt st b =
+  EvadeMessage (EvadeTarget_ sid iid (EnemyTarget eid) src mt st b)
 
 pattern EnemyEvaded :: InvestigatorId -> EnemyId -> Message
 pattern EnemyEvaded iid eid = EvadeMessage (EvadedTarget_ iid (EnemyTarget eid))
@@ -1176,7 +1259,8 @@ pattern SetSkillTestTarget :: Target -> Message
 pattern SetSkillTestTarget tgt = SkillTestMessage (SetSkillTestTarget_ tgt)
 
 pattern SetSkillTestResolveFailureInvestigator :: InvestigatorId -> Message
-pattern SetSkillTestResolveFailureInvestigator iid = SkillTestMessage (SetSkillTestResolveFailureInvestigator_ iid)
+pattern SetSkillTestResolveFailureInvestigator iid =
+  SkillTestMessage (SetSkillTestResolveFailureInvestigator_ iid)
 
 pattern BeginSkillTestWithPreMessages :: Bool -> [Message] -> SkillTest -> Message
 pattern BeginSkillTestWithPreMessages b ms st = SkillTestMessage (BeginSkillTestWithPreMessages_ b ms st)
@@ -1196,7 +1280,8 @@ pattern CommitToSkillTest sid ui = SkillTestMessage (CommitToSkillTest_ sid ui)
 pattern FailSkillTest :: Message
 pattern FailSkillTest = SkillTestMessage FailSkillTest_
 
-pattern FailedSkillTest :: InvestigatorId -> Maybe Action -> Source -> Target -> SkillTestType -> Int -> Message
+pattern FailedSkillTest
+  :: InvestigatorId -> Maybe Action -> Source -> Target -> SkillTestType -> Int -> Message
 pattern FailedSkillTest iid ma src tgt stt n = SkillTestMessage (FailedSkillTest_ iid ma src tgt stt n)
 
 pattern PassSkillTest :: Message
@@ -1205,14 +1290,17 @@ pattern PassSkillTest = SkillTestMessage PassSkillTest_
 pattern PassSkillTestBy :: Int -> Message
 pattern PassSkillTestBy n = SkillTestMessage (PassSkillTestBy_ n)
 
-pattern PassedSkillTest :: InvestigatorId -> Maybe Action -> Source -> Target -> SkillTestType -> Int -> Message
+pattern PassedSkillTest
+  :: InvestigatorId -> Maybe Action -> Source -> Target -> SkillTestType -> Int -> Message
 pattern PassedSkillTest iid ma src tgt stt n = SkillTestMessage (PassedSkillTest_ iid ma src tgt stt n)
 
 pattern RerunSkillTest :: Message
 pattern RerunSkillTest = SkillTestMessage RerunSkillTest_
 
-pattern RevelationSkillTest :: SkillTestId -> InvestigatorId -> Source -> SkillType -> SkillTestDifficulty -> Message
-pattern RevelationSkillTest sid iid src st diff = SkillTestMessage (RevelationSkillTest_ sid iid src st diff)
+pattern RevelationSkillTest
+  :: SkillTestId -> InvestigatorId -> Source -> SkillType -> SkillTestDifficulty -> Message
+pattern RevelationSkillTest sid iid src st diff =
+  SkillTestMessage (RevelationSkillTest_ sid iid src st diff)
 
 pattern RunSkillTest :: InvestigatorId -> Message
 pattern RunSkillTest iid = SkillTestMessage (RunSkillTest_ iid)
@@ -1242,7 +1330,8 @@ pattern RecalculateSkillTestResults :: Message
 pattern RecalculateSkillTestResults = SkillTestMessage RecalculateSkillTestResults_
 
 pattern RecalculateSkillTestResultsCanChangeAutomatic :: Bool -> Message
-pattern RecalculateSkillTestResultsCanChangeAutomatic b = SkillTestMessage (RecalculateSkillTestResultsCanChangeAutomatic_ b)
+pattern RecalculateSkillTestResultsCanChangeAutomatic b =
+  SkillTestMessage (RecalculateSkillTestResultsCanChangeAutomatic_ b)
 
 pattern SkillTestApplyResults :: Message
 pattern SkillTestApplyResults = SkillTestMessage SkillTestApplyResults_
@@ -1296,7 +1385,8 @@ pattern DrawChaosToken iid t = ChaosBagMessage (DrawChaosToken_ iid t)
 pattern ResolveChaosToken :: ChaosToken -> ChaosTokenFace -> InvestigatorId -> Message
 pattern ResolveChaosToken t f iid = ChaosBagMessage (ResolveChaosToken_ t f iid)
 
-pattern TargetResolveChaosToken :: Target -> ChaosToken -> ChaosTokenFace -> InvestigatorId -> Message
+pattern TargetResolveChaosToken
+  :: Target -> ChaosToken -> ChaosTokenFace -> InvestigatorId -> Message
 pattern TargetResolveChaosToken tgt t f iid = ChaosBagMessage (TargetResolveChaosToken_ tgt t f iid)
 
 pattern RevealChaosToken :: Source -> InvestigatorId -> ChaosToken -> Message
@@ -1314,7 +1404,8 @@ pattern RemoveChaosToken f = ChaosBagMessage (RemoveChaosToken_ f)
 pattern ResetTokenPool :: Message
 pattern ResetTokenPool = ChaosBagMessage ResetTokenPool_
 
-pattern RequestChaosTokens :: Source -> Maybe InvestigatorId -> RevealStrategy -> RequestedChaosTokenStrategy -> Message
+pattern RequestChaosTokens
+  :: Source -> Maybe InvestigatorId -> RevealStrategy -> RequestedChaosTokenStrategy -> Message
 pattern RequestChaosTokens src miid rs rts = ChaosBagMessage (RequestChaosTokens_ src miid rs rts)
 
 pattern RequestedChaosTokens :: Source -> Maybe InvestigatorId -> [ChaosToken] -> Message
@@ -1424,8 +1515,10 @@ pattern ClearFound :: Zone -> Message
 pattern ClearFound z = SearchMessage (ClearFound_ z)
 
 -- Bidirectional pattern synonyms preserving the public API for InvestigatorMessage.
-pattern InvestigatorAssignDamage :: InvestigatorId -> Source -> DamageStrategy -> Int -> Int -> Message
-pattern InvestigatorAssignDamage iid src ds d h = InvestigatorMessage (InvestigatorAssignDamage_ iid src ds d h)
+pattern InvestigatorAssignDamage
+  :: InvestigatorId -> Source -> DamageStrategy -> Int -> Int -> Message
+pattern InvestigatorAssignDamage iid src ds d h =
+  InvestigatorMessage (InvestigatorAssignDamage_ iid src ds d h)
 
 pattern InvestigatorCommittedCard :: InvestigatorId -> Card -> Message
 pattern InvestigatorCommittedCard iid c = InvestigatorMessage (InvestigatorCommittedCard_ iid c)
@@ -1454,8 +1547,18 @@ pattern InvestigatorDirectDamage iid src d h = InvestigatorMessage (Investigator
 pattern InvestigatorDiscardAllClues :: Source -> InvestigatorId -> Message
 pattern InvestigatorDiscardAllClues src iid = InvestigatorMessage (InvestigatorDiscardAllClues_ src iid)
 
-pattern InvestigatorDoAssignDamage :: InvestigatorId -> Source -> DamageStrategy -> AssetMatcher -> Int -> Int -> [Target] -> [Target] -> Message
-pattern InvestigatorDoAssignDamage iid src ds m d h dts hts = InvestigatorMessage (InvestigatorDoAssignDamage_ iid src ds m d h dts hts)
+pattern InvestigatorDoAssignDamage
+  :: InvestigatorId
+  -> Source
+  -> DamageStrategy
+  -> AssetMatcher
+  -> Int
+  -> Int
+  -> [Target]
+  -> [Target]
+  -> Message
+pattern InvestigatorDoAssignDamage iid src ds m d h dts hts =
+  InvestigatorMessage (InvestigatorDoAssignDamage_ iid src ds m d h dts hts)
 
 pattern InvestigatorDrawEnemy :: InvestigatorId -> EnemyId -> Message
 pattern InvestigatorDrawEnemy iid eid = InvestigatorMessage (InvestigatorDrawEnemy_ iid eid)
@@ -1463,11 +1566,15 @@ pattern InvestigatorDrawEnemy iid eid = InvestigatorMessage (InvestigatorDrawEne
 pattern InvestigatorDrewEncounterCard :: InvestigatorId -> EncounterCard -> Message
 pattern InvestigatorDrewEncounterCard iid c = InvestigatorMessage (InvestigatorDrewEncounterCard_ iid c)
 
-pattern InvestigatorDrewEncounterCardFrom :: InvestigatorId -> EncounterCard -> Maybe DeckSignifier -> Message
-pattern InvestigatorDrewEncounterCardFrom iid c mds = InvestigatorMessage (InvestigatorDrewEncounterCardFrom_ iid c mds)
+pattern InvestigatorDrewEncounterCardFrom
+  :: InvestigatorId -> EncounterCard -> Maybe DeckSignifier -> Message
+pattern InvestigatorDrewEncounterCardFrom iid c mds =
+  InvestigatorMessage (InvestigatorDrewEncounterCardFrom_ iid c mds)
 
-pattern InvestigatorDrewPlayerCardFrom :: InvestigatorId -> PlayerCard -> Maybe DeckSignifier -> Message
-pattern InvestigatorDrewPlayerCardFrom iid c mds = InvestigatorMessage (InvestigatorDrewPlayerCardFrom_ iid c mds)
+pattern InvestigatorDrewPlayerCardFrom
+  :: InvestigatorId -> PlayerCard -> Maybe DeckSignifier -> Message
+pattern InvestigatorDrewPlayerCardFrom iid c mds =
+  InvestigatorMessage (InvestigatorDrewPlayerCardFrom_ iid c mds)
 
 pattern InvestigatorEliminated :: InvestigatorId -> Message
 pattern InvestigatorEliminated iid = InvestigatorMessage (InvestigatorEliminated_ iid)
@@ -1482,16 +1589,19 @@ pattern InvestigatorsMulligan :: Message
 pattern InvestigatorsMulligan = InvestigatorMessage InvestigatorsMulligan_
 
 pattern InvestigatorPlaceAllCluesOnLocation :: InvestigatorId -> Source -> Message
-pattern InvestigatorPlaceAllCluesOnLocation iid src = InvestigatorMessage (InvestigatorPlaceAllCluesOnLocation_ iid src)
+pattern InvestigatorPlaceAllCluesOnLocation iid src =
+  InvestigatorMessage (InvestigatorPlaceAllCluesOnLocation_ iid src)
 
 pattern InvestigatorPlaceCluesOnLocation :: InvestigatorId -> Source -> Int -> Message
-pattern InvestigatorPlaceCluesOnLocation iid src n = InvestigatorMessage (InvestigatorPlaceCluesOnLocation_ iid src n)
+pattern InvestigatorPlaceCluesOnLocation iid src n =
+  InvestigatorMessage (InvestigatorPlaceCluesOnLocation_ iid src n)
 
 pattern InvestigatorPlayAsset :: InvestigatorId -> AssetId -> Message
 pattern InvestigatorPlayAsset iid aid = InvestigatorMessage (InvestigatorPlayAsset_ iid aid)
 
 pattern InvestigatorClearUnusedAssetSlots :: InvestigatorId -> [AssetId] -> Message
-pattern InvestigatorClearUnusedAssetSlots iid aids = InvestigatorMessage (InvestigatorClearUnusedAssetSlots_ iid aids)
+pattern InvestigatorClearUnusedAssetSlots iid aids =
+  InvestigatorMessage (InvestigatorClearUnusedAssetSlots_ iid aids)
 
 pattern InvestigatorAdjustAssetSlots :: InvestigatorId -> AssetId -> Message
 pattern InvestigatorAdjustAssetSlots iid aid = InvestigatorMessage (InvestigatorAdjustAssetSlots_ iid aid)
@@ -1502,7 +1612,8 @@ pattern InvestigatorAdjustSlot iid s a b = InvestigatorMessage (InvestigatorAdju
 pattern InvestigatorPlayedAsset :: InvestigatorId -> AssetId -> Message
 pattern InvestigatorPlayedAsset iid aid = InvestigatorMessage (InvestigatorPlayedAsset_ iid aid)
 
-pattern InvestigatorPlayEvent :: InvestigatorId -> EventId -> Maybe Target -> [Window] -> Zone -> Message
+pattern InvestigatorPlayEvent
+  :: InvestigatorId -> EventId -> Maybe Target -> [Window] -> Zone -> Message
 pattern InvestigatorPlayEvent iid eid mt ws z = InvestigatorMessage (InvestigatorPlayEvent_ iid eid mt ws z)
 
 pattern InvestigatorResigned :: InvestigatorId -> Message
@@ -1657,7 +1768,8 @@ pattern DisengageEnemy iid eid = EngageMessage (DisengageEnemy_ iid eid)
 pattern DisengageEnemyFromAll :: EnemyId -> Message
 pattern DisengageEnemyFromAll eid = EngageMessage (DisengageEnemyFromAll_ eid)
 
-pattern ChooseEngageEnemy :: InvestigatorId -> Source -> Maybe Target -> EnemyMatcher -> Bool -> Message
+pattern ChooseEngageEnemy
+  :: InvestigatorId -> Source -> Maybe Target -> EnemyMatcher -> Bool -> Message
 pattern ChooseEngageEnemy iid src mt m b = EngageMessage (ChooseEngageEnemy_ iid src mt m b)
 
 pattern CheckEnemyEngagement :: InvestigatorId -> Message
@@ -1676,10 +1788,12 @@ pattern EnemySpawn d = SpawnMessage (EnemySpawn_ d)
 pattern EnemySpawned :: SpawnDetails -> Message
 pattern EnemySpawned d = SpawnMessage (EnemySpawned_ d)
 
-pattern EnemySpawnAtLocationMatching :: Maybe InvestigatorId -> LocationMatcher -> EnemyId -> Message
+pattern EnemySpawnAtLocationMatching
+  :: Maybe InvestigatorId -> LocationMatcher -> EnemyId -> Message
 pattern EnemySpawnAtLocationMatching miid m eid = SpawnMessage (EnemySpawnAtLocationMatching_ miid m eid)
 
-pattern EnemySpawnFromOutOfPlay :: OutOfPlayZone -> Maybe InvestigatorId -> LocationId -> EnemyId -> Message
+pattern EnemySpawnFromOutOfPlay
+  :: OutOfPlayZone -> Maybe InvestigatorId -> LocationId -> EnemyId -> Message
 pattern EnemySpawnFromOutOfPlay z miid lid eid = SpawnMessage (EnemySpawnFromOutOfPlay_ z miid lid eid)
 
 pattern EnemySpawnEngagedWithPrey :: EnemyId -> Message
@@ -1768,14 +1882,26 @@ pattern SealChaosToken t = SealMessage (SealChaosToken_ t)
 pattern SealedChaosToken :: ChaosToken -> Maybe InvestigatorId -> Target -> Message
 pattern SealedChaosToken t miid tgt = SealMessage (SealedChaosToken_ t miid tgt)
 
+pattern PlaceChaosToken :: ChaosToken -> Message
+pattern PlaceChaosToken t = SealMessage (PlaceChaosToken_ t)
+
+pattern PlacedChaosToken :: ChaosToken -> LocationId -> Message
+pattern PlacedChaosToken t lid = SealMessage (PlacedChaosToken_ t lid)
+
 pattern SetChaosTokenAside :: ChaosToken -> Message
 pattern SetChaosTokenAside t = SealMessage (SetChaosTokenAside_ t)
 
 pattern UnsealChaosToken :: ChaosToken -> Message
 pattern UnsealChaosToken t = SealMessage (UnsealChaosToken_ t)
 
+pattern RemovePlacedChaosToken :: ChaosToken -> Message
+pattern RemovePlacedChaosToken t = SealMessage (RemovePlacedChaosToken_ t)
+
 pattern RemoveAllChaosTokens :: ChaosTokenFace -> Message
 pattern RemoveAllChaosTokens f = SealMessage (RemoveAllChaosTokens_ f)
+
+pattern RemoveAllPlacedChaosTokens :: ChaosTokenFace -> Message
+pattern RemoveAllPlacedChaosTokens f = SealMessage (RemoveAllPlacedChaosTokens_ f)
 
 -- Bidirectional pattern synonyms preserving the public API for HorrorMessage.
 pattern HealAllHorror :: Target -> Source -> Message
@@ -1799,7 +1925,8 @@ deblank = \case
   msg -> msg
 
 mconcat
-  [ deriveToJSON defaultOptions ''Message
+  [ deriveJSON defaultOptions ''InitDeckAttrs
+  , deriveToJSON defaultOptions ''Message
   , [d|
       instance FromJSON Message where
         parseJSON = withObject "Message" \o -> do
@@ -1842,6 +1969,13 @@ mconcat
               case contents of
                 Right (a, b, c, d) -> pure $ PlayerWindow a b c d
                 Left (a, b, c) -> pure $ PlayerWindow a b c True
+            "InitDeck" -> do
+              contents <-
+                (Right <$> o .: "contents")
+                  <|> (Left <$> o .: "contents")
+              case contents of
+                Right attrs -> pure $ InitDeck attrs
+                Left (iid, murl, deck) -> pure $ InitDeck $ InitDeckAttrs iid murl Nothing deck
             "AddToVictory" -> do
               contents <- (Left <$> o .: "contents") <|> (Right <$> o .: "contents")
               case contents of
@@ -2177,7 +2311,8 @@ mconcat
             "RemoveSkill" -> Remove . SkillTarget <$> o .: "contents"
             "RemoveTreachery" -> Remove . TreacheryTarget <$> o .: "contents"
             "RemoveLocation" -> Remove . LocationTarget <$> o .: "contents"
-            _ | t `elem` legacyChaosBagMessageTags -> asLegacyWrapped ChaosBagMessage t o
+            _
+              | t `elem` legacyChaosBagMessageTags -> asLegacyWrapped ChaosBagMessage t o
               | t `elem` legacyClueMessageTags -> asLegacyWrapped ClueMessage t o
               | t `elem` legacyDamageMessageTags -> asLegacyWrapped DamageMessage t o
               | t `elem` legacyDefeatMessageTags -> asLegacyWrapped DefeatMessage t o
@@ -2359,9 +2494,13 @@ legacySealMessageTags :: [Text]
 legacySealMessageTags =
   [ "SealChaosToken"
   , "SealedChaosToken"
+  , "PlaceChaosToken"
+  , "PlacedChaosToken"
   , "SetChaosTokenAside"
   , "UnsealChaosToken"
+  , "RemovePlacedChaosToken"
   , "RemoveAllChaosTokens"
+  , "RemoveAllPlacedChaosTokens"
   ]
 
 legacySearchMessageTags :: [Text]
@@ -2646,4 +2785,32 @@ chooseDecks pids =
     , AskMap $ mapFromList $ map (,ChooseDeck) pids
     , DoneChoosingDecks
     ]
--- 
+
+{- | Like 'chooseDecks' but for AI-assisted games. Each AI seat in @aiSeats@ is
+loaded from its bundled decklist in-place and is NOT prompted; only the
+remaining (human) seats receive a 'ChooseDeck' question.
+
+The two ordering invariants this preserves:
+
+  * The @LoadDecklist@s run /after/ 'ChoosingDecks' (which wipes investigators)
+    and /before/ 'DoneChoosingDecks' (which flips to 'IsActive'), so the loaded
+    AI investigators survive the wipe and are present the instant the game parks
+    on the human deck prompt.
+  * The 'AskMap' contains only human seats, so the game never parks waiting on an
+    AI seat. When every seat is AI the 'AskMap' is omitted entirely.
+
+With @aiSeats == []@ the emitted message list is identical to @chooseDecks pids@,
+so non-AI games are unaffected.
+-}
+chooseDecksWithAi :: [PlayerId] -> [(PlayerId, ArkhamDBDecklist)] -> Message
+chooseDecksWithAi pids aiSeats =
+  Run
+    $ [SetGameState (IsChooseDecks pids), ChoosingDecks]
+    <> [LoadDecklist pid decklist | (pid, decklist) <- aiSeats]
+    <> [AskMap (mapFromList (map (,ChooseDeck) humanPids)) | notNull humanPids]
+    <> [DoneChoosingDecks]
+ where
+  aiPids = map fst aiSeats
+  humanPids = filter (`notElem` aiPids) pids
+
+--

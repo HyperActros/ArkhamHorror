@@ -15,13 +15,16 @@ import Arkham.Classes hiding (matches)
 import Arkham.Classes.HasGame
 import Arkham.Deck qualified as Deck
 import Arkham.Helpers.ChaosToken (getModifiedChaosTokenFaces)
+import Arkham.Game.Utils (maybeLocation)
 import Arkham.Helpers.Cost (getCanAffordCost)
+import Arkham.Helpers.Enemy (ignoredKeywordWindowsForEnemy)
 import Arkham.Helpers.Message
 import Arkham.Helpers.Modifiers (ModifierType (..), getModifiers, skillTestModifier)
 import Arkham.Helpers.Query (getActiveInvestigatorId, getLeadPlayer)
 import Arkham.Helpers.Ref (sourceToMaybeCard, targetToMaybeCard)
 import Arkham.Helpers.Window (checkAfter, checkCancel, checkWhen, checkWindows, windows)
 import Arkham.Id
+import Arkham.Keyword qualified as Keyword
 import Arkham.Matcher hiding (IgnoreChaosToken, RevealChaosToken)
 import Arkham.Message qualified as Msg
 import Arkham.Prelude
@@ -40,6 +43,29 @@ import Arkham.Window qualified as Window
 import Control.Lens (each)
 import Data.Map.Strict qualified as Map
 
+locationTargetToMaybeCard :: (HasCallStack, HasGame m, Tracing m) => LocationId -> m (Maybe Card)
+locationTargetToMaybeCard lid = do
+  mCard <- targetToMaybeCard (LocationTarget lid)
+  case mCard of
+    Just card -> pure $ Just card
+    Nothing -> fmap toCard <$> maybeLocation lid
+
+skillTestTargetToMaybeCard :: (HasCallStack, HasGame m, Tracing m) => Target -> m (Maybe Card)
+skillTestTargetToMaybeCard = \case
+  LocationTarget lid -> locationTargetToMaybeCard lid
+  ProxyTarget t _ -> skillTestTargetToMaybeCard t
+  t -> targetToMaybeCard t
+
+skillTestSourceToMaybeCard :: (HasCallStack, HasGame m, Tracing m, Sourceable source) => source -> m (Maybe Card)
+skillTestSourceToMaybeCard (toSource -> source) = case source of
+  LocationSource lid -> locationTargetToMaybeCard lid
+  AbilitySource src _ -> skillTestSourceToMaybeCard src
+  UseAbilitySource _ src _ -> skillTestSourceToMaybeCard src
+  ProxySource u t -> runMaybeT $ MaybeT (skillTestSourceToMaybeCard t) <|> MaybeT (skillTestSourceToMaybeCard u)
+  IndexedSource _ t -> skillTestSourceToMaybeCard t
+  PaymentSource inner -> skillTestSourceToMaybeCard inner
+  s -> sourceToMaybeCard s
+
 totalModifiedSkillValue :: (HasGame m, Tracing m) => SkillTest -> m Int
 totalModifiedSkillValue s = do
   results <- calculateSkillTestResultsData s
@@ -49,13 +75,6 @@ totalModifiedSkillValue s = do
     $ max
       0
       (skillTestResultsSkillValue results + chaosTokenValues + skillTestResultsIconValue results)
-
-autoFailSkillTestResultsData :: (HasGame m, Tracing m) => SkillTest -> m SkillTestResultsData
-autoFailSkillTestResultsData s = do
-  modifiedSkillTestDifficulty <- getModifiedSkillTestDifficulty s
-  mods <- getModifiers s
-  let x = getSum $ mconcat [Sum n | SkillTestResultValueModifier n <- mods]
-  pure $ SkillTestResultsData 0 0 0 modifiedSkillTestDifficulty (guard (x /= 0) $> x) False
 
 computeCommitCosts :: HasGame m => InvestigatorId -> [Card] -> m [Cost]
 computeCommitCosts iid cards = do
@@ -112,17 +131,26 @@ instance RunMessage SkillTest where
     BeginSkillTestAfterFast -> do
       let windows' = windows [Window.InitiatedSkillTest s]
       windowMsg <- checkWindows [mkWindow #when Window.FastPlayerWindow]
+      -- When the attempt's own source ignores a chosen enemy's keyword (e.g. .45
+      -- Automatic (2) ignoring Retaliate), the keyword's effect is ignored for the
+      -- whole attempt. Fire it here, at declaration, while this test is current so
+      -- the test-scoped ignore modifier is visible.
+      ignoreWindows <- case (skillTestAction, skillTestTarget.enemy) of
+        (Just Action.Fight, Just eid) ->
+          ignoredKeywordWindowsForEnemy skillTestSource skillTestInvestigator eid Keyword.Retaliate IgnoreRetaliate
+        (Just Action.Evade, Just eid) ->
+          ignoredKeywordWindowsForEnemy skillTestSource skillTestInvestigator eid Keyword.Alert IgnoreAlert
+        _ -> pure []
       pushAll
         $ windows'
+        <> ignoreWindows
         <> [Do BeginSkillTestAfterFast, windowMsg, BeforeSkillTest s.id, EndSkillTestWindow]
       mAbilityCardId <- case skillTestSource of
-        AbilitySource src _ -> fmap toCardId <$> sourceToMaybeCard src
-        UseAbilitySource _ src _ -> fmap toCardId <$> sourceToMaybeCard src
-        t -> fmap toCardId <$> sourceToMaybeCard t
-      mTargetCardId <- case skillTestTarget of
-        ProxyTarget t _ -> fmap toCardId <$> targetToMaybeCard t
-        t -> fmap toCardId <$> targetToMaybeCard t
-      mSourceCardId <- fmap toCardId <$> sourceToMaybeCard skillTestSource
+        AbilitySource src _ -> fmap toCardId <$> skillTestSourceToMaybeCard src
+        UseAbilitySource _ src _ -> fmap toCardId <$> skillTestSourceToMaybeCard src
+        t -> fmap toCardId <$> skillTestSourceToMaybeCard t
+      mTargetCardId <- fmap toCardId <$> skillTestTargetToMaybeCard skillTestTarget
+      mSourceCardId <- fmap toCardId <$> skillTestSourceToMaybeCard skillTestSource
 
       updatedSkillTestType <- case skillTestType of
         SkillSkillTest stype -> SkillSkillTest <$> getAlternateSkill s stype
@@ -189,10 +217,10 @@ instance RunMessage SkillTest where
           ]
       pure s
     RemovedFromPlay (SkillSource sid) -> do
-      card <- field Field.SkillCard sid
+      mCard <- fieldMay Field.SkillCard sid
       pure
         $ s
-        & (committedCardsL . each %~ filter ((/= card.id) . toCardId))
+        & (committedCardsL . each %~ maybe id (\card -> filter ((/= card.id) . toCardId)) mCard)
         & (subscribersL %~ filter (not . isTarget sid))
     RemoveFromGame target | target == skillTestTarget -> do
       when (skillTestStep < RevealChaosTokenStep) do
@@ -350,7 +378,6 @@ instance RunMessage SkillTest where
         checkAfter $ Window.RevealChaosTokensDuringSkillTest iid s skillTestToResolveChaosTokens
       pushAll $ UnfocusChaosTokens
         : cancelRevealWindow
-        : afterRevealMsg
         : afterRevealWindow
         : afterRevealMsg
         : [ Will (ResolveChaosToken drawnChaosToken chaosTokenFace iid)
@@ -497,7 +524,11 @@ instance RunMessage SkillTest where
       pushAll [CheckAllAdditionalCommitCosts, windowMsg, TriggerSkillTest skillTestInvestigator]
       pure $ s & stepL .~ SkillTestFastWindow2
     CheckAllAdditionalCommitCosts -> do
-      let perInvestigator = Map.toList skillTestCommittedCards
+      -- Only investigators who actually committed at least one card incur commit
+      -- costs / fire CommittedCards windows. Un-committing leaves an empty list
+      -- under the investigator's key, and investigator-level CommitCost modifiers
+      -- (e.g. Trapped Spirits) would otherwise still be charged for zero cards.
+      let perInvestigator = filter (not . null . snd) $ Map.toList skillTestCommittedCards
       payable <- flip filterM perInvestigator $ \(iid, cards) -> do
         additionalCosts <- computeCommitCosts iid cards
         if null additionalCosts
@@ -514,15 +545,13 @@ instance RunMessage SkillTest where
           let allCommits = [(i, c) | (i, cs) <- payable, c <- cs]
           let (triggerCommits, noTriggerCommits) =
                 partition (cdCommitTrigger . toCardDef . snd) allCommits
-          -- Plain icon-only commits do nothing on `Do (CommitCard)`; run them
-          -- silently so the player isn't prompted with a meaningless choice.
-          unless (null noTriggerCommits)
-            $ pushAll [CommitCard i c | (i, c) <- noTriggerCommits]
           -- Trigger cards may have effects whose ordering matters (e.g. Promise
           -- of Power adds a curse that Unrelenting should be able to seal).
           -- chooseOrRunOneAtATimeWithLabel auto-runs a single choice without
           -- prompting; with 2+ it shows the label so the player understands
-          -- they're picking the order of on-commit effects.
+          -- they're picking the order of on-commit effects. Pushed before the
+          -- non-trigger block below so (because pushes prepend) these on-commit
+          -- triggers run *after* the plain/additional-cost commits.
           case triggerCommits of
             [] -> pure ()
             _ -> do
@@ -532,6 +561,13 @@ instance RunMessage SkillTest where
                   "$label.chooseCommitOrder"
                   player
                   [targetLabel (toCardId c) [CommitCard i c] | (i, c) <- triggerCommits]
+          -- Plain icon-only commits do nothing on `Do (CommitCard)`; run them
+          -- silently so the player isn't prompted with a meaningless choice.
+          -- Pushed last (so they run first) to lock in any additional commit
+          -- cost (e.g. Watch This' "spend up to 3 resources") before after-commit
+          -- triggers (e.g. Out the Door) grant resources.
+          unless (null noTriggerCommits)
+            $ pushAll [CommitCard i c | (i, c) <- noTriggerCommits]
           pushAll [PayCommitCosts i cs | (i, cs) <- payable]
       pure s
     PayCommitCosts iid cards -> do
@@ -617,8 +653,8 @@ instance RunMessage SkillTest where
       push $ ResetChaosTokens (toSource s)
       pure $ s & (setAsideChaosTokensL .~ mempty)
     AddToVictory _ (SkillTarget sid) -> do
-      card <- field Field.SkillCard sid
-      pure $ s & committedCardsL . each %~ filter (/= card)
+      mCard <- fieldMay Field.SkillCard sid
+      pure $ s & committedCardsL . each %~ maybe id (\card -> filter (/= card)) mCard
     Do (SkillTestEnds _ _ _) -> do
       -- Skill Cards are in the environment and will be discarded normally
       -- However, all other cards need to be discarded here.
@@ -701,10 +737,14 @@ instance RunMessage SkillTest where
              ]
       pure $ s & stepL .~ SkillTestEndsStep
     ReturnToHand _ (SkillTarget sid) -> do
-      card <- field Field.SkillCard sid
+      -- The skill may already be gone (e.g. a doubled "if this test succeeds"
+      -- return from Double or Nothing returning Arrogance a second time), in
+      -- which case it was already removed from the committed cards by the first
+      -- return. Guard the lookup so we don't crash re-fetching it.
+      mCard <- fieldMay Field.SkillCard sid
       pure
         $ s
-        & (committedCardsL . each %~ filter ((/= card.id) . toCardId))
+        & (committedCardsL . each %~ maybe id (\card -> filter ((/= card.id) . toCardId)) mCard)
         & (subscribersL %~ filter (not . isTarget sid))
     ReturnToHand _ (CardIdTarget cardId) -> do
       pure $ s & committedCardsL . each %~ filter ((/= cardId) . toCardId)

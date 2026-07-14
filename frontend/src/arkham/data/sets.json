@@ -59,6 +59,7 @@
   { "name": "The Feast of Hemloch Vale Investigator Expansion", "min": 10001, "max": 10138, "playerCards": 138, "code": "fhvp", "cycle": 10 },
   { "name": "The Feast of Hemloch Vale Campaign Expansion", "min": 10501, "max": 10743, "playerCards": 0, "code": "fhvc", "cycle": 10, "encounterDuplicates": 8 },
   { "name": "The Drowned City Investigator Expansion", "min": 11001, "max": 11129, "playerCards": 129, "code": "tdcp", "cycle": 11 },
+  { "name": "The Drowned City Campaign Expansion", "min": 11501, "max": 11766, "playerCards": 0, "code": "tdcc", "cycle": 11, "encounterDuplicates": 2, "missing": ["11584", "11585", "11586", "11597", "11668", "11718"] },
   { "name": "Core 2026", "min": 12001, "max": 12195, "playerCards": 104, "code": "core2026", "cycle": 12 },
 
   { "name": "Return to Night of the Zealot", "min": 50001, "max": 50046, "playerCards": 10, "code": "rtnotz", "cycle": 50 },
@@ -85,9 +86,9 @@
   { "name": "Guardians of the Abyss", "min": 83001, "max": 83058, "playerCards": 0, "code": "guardians", "cycle": 70 },
   { "name": "Murder at the Excelsior Hotel", "min": 84001, "max": 84052, "playerCards": 0, "code": "hotel", "cycle": 70 },
   { "name": "The Blob That Ate Everything", "min": 85001, "max": 85053, "playerCards": 0, "code": "blob", "cycle": 70 },
-  { "name": "War of the Outer Gods", "min": 86001, "max": 86055, "playerCards": 0, "code": "wog", "cycle": 70 },
+  { "name": "War of the Outer Gods", "min": 86001, "max": 86055, "playerCards": 0, "code": "wog", "cycle": 70, "encounterDuplicates": 3 },
   { "name": "Machinations Through Time", "min": 87001, "max": 87057, "playerCards": 0, "code": "mtt", "cycle": 70 },
-  { "name": "Fortune and Folly", "min": 88001, "max": 88053, "playerCards": 0, "code": "faf", "cycle": 70 },
+  { "name": "Fortune and Folly", "min": 88001, "max": 88053, "playerCards": 0, "code": "faf", "cycle": 70, "encounterDuplicates": 25 },
 
   { "name": "The Blob That Ate Everything ELSE!", "min": 89001, "max": 89021, "playerCards": 5, "code": "blbe", "cycle": 70 },
   { "name": "The Midwinter Gala", "min": 71001, "max": 71062, "playerCards": 0, "code": "tmg", "cycle": 70 },

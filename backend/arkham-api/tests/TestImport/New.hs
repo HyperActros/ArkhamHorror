@@ -437,7 +437,7 @@ assertHasNoReaction = do
       AbilityLabel {} -> True
       _ -> False
   case mapToList questionMap of
-    [(_, question)] -> case question of
+    [(_, question)] -> case stripQuestionWrappers question of
       ChooseOne msgs -> case find isReaction msgs of
         Just msg -> expectationFailure $ "expected no reaction, but found " <> show msg
         Nothing -> pure ()
@@ -473,6 +473,7 @@ chooseOptionAcrossQuestions reason f = do
   let
     findIn = \case
       QuestionLabel _ _ q -> findIn q
+      QuestionWithSource _ _ q -> findIn q
       ChooseOne msgs -> find f msgs
       PlayerWindowChooseOne msgs -> find f msgs
       ChooseOneAtATime msgs -> find f msgs
@@ -639,7 +640,7 @@ applyAllDamage = do
   questionMap <- gameQuestion <$> getGame
   let
     choices = case mapToList questionMap of
-      [(_, question)] -> case question of
+      [(_, question)] -> case stripQuestionWrappers question of
         ChooseOne msgs -> msgs
         PlayerWindowChooseOne msgs -> msgs
         _ -> []
@@ -659,7 +660,7 @@ applyAllHorror = do
   questionMap <- gameQuestion <$> getGame
   let
     choices = case mapToList questionMap of
-      [(_, question)] -> case question of
+      [(_, question)] -> case stripQuestionWrappers question of
         ChooseOne msgs -> msgs
         PlayerWindowChooseOne msgs -> msgs
         _ -> []
@@ -706,7 +707,7 @@ assertNoReaction = do
   questionMap <- gameQuestion <$> getGame
   let
     choices = case mapToList questionMap of
-      [(_, question)] -> case question of
+      [(_, question)] -> case stripQuestionWrappers question of
         ChooseOne msgs -> msgs
         PlayerWindowChooseOne msgs -> msgs
         _ -> []
@@ -729,7 +730,7 @@ assertTarget (toTarget -> target) = do
   let
     choices =
       case mapToList questionMap of
-        [(_, question)] -> case question of
+        [(_, question)] -> case stripQuestionWrappers question of
           ChooseOne msgs -> msgs
           PlayerWindowChooseOne msgs -> msgs
           ChooseN _ msgs -> msgs
@@ -755,7 +756,7 @@ assertNotTarget (toTarget -> target) = do
   let
     choices =
       case mapToList questionMap of
-        [(_, question)] -> case question of
+        [(_, question)] -> case stripQuestionWrappers question of
           ChooseOne msgs -> msgs
           PlayerWindowChooseOne msgs -> msgs
           ChooseN _ msgs -> msgs
@@ -799,7 +800,7 @@ assertDamageIsDirect = do
   questionMap <- gameQuestion <$> getGame
   let
     choices = case mapToList questionMap of
-      [(_, question)] -> case question of
+      [(_, question)] -> case stripQuestionWrappers question of
         ChooseOne msgs -> msgs
         PlayerWindowChooseOne msgs -> msgs
         _ -> []
@@ -818,7 +819,7 @@ assertHorrorIsDirect = do
   questionMap <- gameQuestion <$> getGame
   let
     choices = case mapToList questionMap of
-      [(_, question)] -> case question of
+      [(_, question)] -> case stripQuestionWrappers question of
         ChooseOne msgs -> msgs
         PlayerWindowChooseOne msgs -> msgs
         _ -> []
@@ -915,6 +916,20 @@ assertMaxAmountChoice n = do
     MinAmountTarget _ -> expectationFailure "expected MaxAmountTarget"
     TotalAmountTarget _ -> expectationFailure "expected MaxAmountTarget"
     AmountOneOf _ -> expectationFailure "expected MaxAmountTarget"
+
+-- | Resolve a "spend up to" cost (a 'PayCostQuestion' wrapping a single-choice
+-- 'ChoosePaymentAmounts', e.g. Watch This' additional cost). Asserts the
+-- offered maximum equals @expectedMax@, then pays @amount@ units of it.
+payUpTo :: HasCallStack => Int -> Int -> TestAppT ()
+payUpTo expectedMax amount = do
+  questionMap <- gameQuestion <$> getGame
+  case mapToList questionMap of
+    [(_, PayCostQuestion _ (ChoosePaymentAmounts _ _ [choice]))] -> do
+      choice.maxBound `shouldBe` expectedMax
+      replicateM_ amount (push choice.message)
+      runMessages
+    [(_, question)] -> error $ "expected a PayCostQuestion/ChoosePaymentAmounts, but got: " <> show question
+    _ -> error "expected exactly one question"
 
 beginsWithInPlay :: CardDef -> CardDef -> SpecWith ()
 beginsWithInPlay investigator card = it ("begins with " <> T.unpack (toTitle card) <> " in play") . gameTestWith investigator $ \self -> do

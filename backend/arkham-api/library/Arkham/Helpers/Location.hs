@@ -41,7 +41,7 @@ toConnections lid =
   fieldMap LocationCard (cdLocationRevealedConnections . toCardDef) lid
 
 getConnectedMatcher :: (HasGame m, Tracing m) => ForMovement -> LocationId -> m LocationMatcher
-getConnectedMatcher forMovement l = do
+getConnectedMatcher forMovement l = cached (ConnectedMatcherKey l forMovement) $ do
   isRevealed <- field LocationRevealed l
   directionalMatchers <- fieldMap LocationConnectsTo (map (`LocationInDirection` self) . setToList) l
   base <-
@@ -72,9 +72,12 @@ placementLocation :: (HasCallStack, HasGame m, Tracing m) => Placement -> m (May
 placementLocation = \case
   AtLocation lid -> pure $ Just lid
   AttachedToLocation lid -> pure $ Just lid
-  InPlayArea iid -> field InvestigatorLocation iid
-  InThreatArea iid -> field InvestigatorLocation iid
-  AttachedToInvestigator iid -> field InvestigatorLocation iid
+  -- Use the safe (join) read: an entity may briefly reference an investigator who
+  -- has been removed from the game (e.g. while a group swap parks on deck choice),
+  -- and a location lookup during a matcher scan must not crash on the missing id.
+  InPlayArea iid -> fieldMayJoin InvestigatorLocation iid
+  InThreatArea iid -> fieldMayJoin InvestigatorLocation iid
+  AttachedToInvestigator iid -> fieldMayJoin InvestigatorLocation iid
   AttachedToEnemy eid -> fieldMayJoin EnemyLocation eid
   AttachedToTreachery tid -> fieldMayJoin TreacheryLocation tid
   AttachedToAsset aid' _ -> fieldMayJoin AssetLocation aid'
@@ -258,7 +261,7 @@ getCanMoveToLocations_ iid source ls = cached (CanMoveToLocationsKey_ iid (toSou
           imods <- getModifiers iid
           mods <- getModifiers lid
           let extraCostsToLeave = mconcat [c | AdditionalCostToLeave c <- mods]
-          let barricaded = concat [xs | Barricades xs <- mods]
+          let barricaded = if CanIgnoreBarriers `elem` imods then [] else concat [xs | Barricades xs <- mods]
           ls & filter (and . sequence [(/= lid), (`notElem` barricaded)]) & filterM \l -> do
             mods' <- getModifiers l
             pcosts <- filterM ((l <=~>) . fst) [(ma, c) | AdditionalCostToEnterMatching ma c <- imods]

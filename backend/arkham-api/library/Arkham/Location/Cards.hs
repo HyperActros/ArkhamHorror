@@ -8,12 +8,17 @@ import Arkham.Location.CardDefs.ReturnTo as X
 import Arkham.Location.CardDefs.Standalone as X
 import Arkham.Location.CardDefs.TheCircleUndone as X
 import Arkham.Location.CardDefs.TheDreamEaters as X
+import Arkham.Location.CardDefs.TheDrownedCity as X
 import Arkham.Location.CardDefs.TheDunwichLegacy as X
 import Arkham.Location.CardDefs.TheFeastOfHemlockVale as X
 import Arkham.Location.CardDefs.TheForgottenAge as X
 import Arkham.Location.CardDefs.TheInnsmouthConspiracy as X
 import Arkham.Location.CardDefs.ThePathToCarcosa as X
 import Arkham.Location.CardDefs.TheScarletKeys as X
+import Arkham.Location.CardDefs.ByTheBook as X
+import Arkham.Location.CardDefs.RelicsOfThePast as X
+import Arkham.Location.CardDefs.DarkMatter as X
+import Arkham.Location.CardDefs.CircusExMortis as X
 
 import Arkham.Card.CardCode
 import Arkham.Card.CardDef
@@ -33,6 +38,7 @@ allLocationCards =
       , abandonedChapelSpectral
       , abandonedShack
       , abandonedSite
+      , abandonedWarehouse
       , abbeyChurch
       , abbeyTowerSpiresForbidden
       , abbeyTowerThePathIsOpen
@@ -40,6 +46,7 @@ allLocationCards =
       , administrationBuilding
       , administrationOffice_130
       , administrationOffice_131
+      , aDreamBetwixt
       , airfield
       , akwan
       , alaskanWilds
@@ -56,6 +63,9 @@ allLocationCards =
       , ancientHallRearrangedByTime
       , ancientPlanetarium
       , anotherDimension
+      , arkhamAdvertiserFuture
+      , arkhamAdvertiserPresent
+      , arkhamGazette
       , arkhamPoliceStation
       , arkhamWoodsBootleggingOperation
       , arkhamWoodsCliffside
@@ -151,6 +161,34 @@ allLocationCards =
       , burnedRuins_205
       , cafeLunaBastionOfRemembrance
       , cafeLunaCoterieHaunt
+      , cairoBazaar
+      , arkham
+      , chamberOfDecay
+      , chamberOfHunger
+      , chamberOfNightEpicMultiplayer
+      , chamberOfNight
+      , chamberOfPoison
+      , chamberOfRain
+      , chamberOfRegret
+      , chamberOfRot
+      , chamberOfSecretsBloodyPrison
+      , chamberOfSecretsEnshroudedPrison
+      , chamberOfSecretsMysteriousPrison
+      , chamberOfSorrowsEpicMultiplayer
+      , chamberOfSorrows
+      , labyrinthineHallsCorpseFilledPath
+      , labyrinthineHallsFoulSmellingPath
+      , labyrinthineHallsOvergrownPath
+      , streetsOfProvidence
+      , athenaeumOfTheEmptySky
+      , theArcade
+      , streetsOfMontreal
+      , chateauRamezay
+      , shrineOfMaghanArkat
+      , streetsOfNewYorkCity
+      , theBurningPit
+      , thePenthouse
+      , hubDimension
       , canalSaintMartin
       , canalSide
       , canalsOfTenochtitlan_180
@@ -190,6 +228,7 @@ allLocationCards =
       , chapultepecHill_178
       , chapultepecHill_179
       , chapultepecPark
+      , childhoodHome
       , choeurGothique_292
       , choeurGothique_293
       , chthonianDepths
@@ -224,6 +263,7 @@ allLocationCards =
       , controlStation
       , coop
       , corpseGrove
+      , corriganIndustries
       , cosmicGate
       , cosmicIngress
       , coterieLibraryLair
@@ -267,6 +307,7 @@ allLocationCards =
       , depthsOfDemheTheHeightOfTheDepths
       , descentToYoth
       , desertedStation
+      , desertOasis
       , desolateCoastline
       , desolateRoad_a
       , desolateRoad_b
@@ -295,6 +336,7 @@ allLocationCards =
       , dressingRoom
       , drKenslersOffice
       , dryBurrow
+      , dunesOfTheSahara
       , dunwichVillage_242
       , dunwichVillage_243
       , dyersClassroom
@@ -304,6 +346,7 @@ allLocationCards =
       , easttownArkhamPoliceStation
       , eerieGlade
       , elderChamber
+      , eldritchGate
       , elMalecon
       , emergencyRoom
       , enchantedWoodsFungalForest
@@ -333,8 +376,10 @@ allLocationCards =
       , exhibitHallRestrictedHall
       , exhibitHallTheArchives
       , expeditionCamp
+      , expeditionCampGuardiansOfTheAbyss
       , experimentalTherapiesWard
       , eztliExhibit
+      , facelessSphinx
       , facultyOfficesTheHourIsLate
       , facultyOfficesTheNightIsStillYoung
       , fairbanks
@@ -396,7 +441,7 @@ allLocationCards =
       , gilmanHouse
       , gilmanHouseInTooDeep
       , glacialGrotto
-      , glimmeringMeadow
+      , glimmeringWoods
       , gondola
       , gothicSet
       , grandBazaarBusyWalkway
@@ -581,7 +626,11 @@ allLocationCards =
       , miskatonicQuad
       , miskatonicRiver
       , miskatonicUniversity
+      , miskatonicUniversityFuture
       , miskatonicUniversityMiskatonicMuseum
+      , miskatonicUniversityPast
+      , miskatonicUniversityPresent
+      , mistFilledCaverns
       , mistPylon_174
       , mistPylon_175
       , mistPylon_176
@@ -609,6 +658,7 @@ allLocationCards =
       , muddyFen
       , museumEntrance
       , museumHalls
+      , museumOfEgyptianAntiquities
       , mushroomGrove
       , mysteriousStairs_183
       , mysteriousStairs_184
@@ -623,12 +673,14 @@ allLocationCards =
       , newChurchGreenInTooDeep
       , nexusOfNKai
       , nightmareBreach
+      , nileRiver
       , northside
       , northsideTrainStation
       , northTower_287
       , northTower_288
       , notreDame
       , obeliskOfTheodosius
+      , oMalleysWatchShop
       , office
       , officeMurderAtTheExcelsiorHotel
       , officeSpectral
@@ -658,6 +710,7 @@ allLocationCards =
       , outerWall_286
       , outsidersLair
       , outsidersLairWithoutATrace
+      , outskirtsOfCairo
       , overgrownCairns
       , overgrownRuins
       , overgrownTunnel
@@ -763,6 +816,9 @@ allLocationCards =
       , ritualSiteTeetawn
       , ritualSiteTothis
       , riverCanyon
+      , riverDocksFuture
+      , riverDocksPast
+      , riverDocksPresent
       , riversideTemple
       , rivertown
       , rivertown_292
@@ -797,6 +853,8 @@ allLocationCards =
       , saltMarshes
       , sanctumDoorwayCeremonyRoom
       , sanctumDoorwayHoldingCells
+      , sandsOfDashur
+      , sandsweptRuins
       , sanMarcoBasilica
       , sarnath
       , sawboneAlley
@@ -853,6 +911,7 @@ allLocationCards =
       , spaceSet
       , staffAccessHallway
       , stageOfTheWardTheatre
+      , stairwayToSarkomand
       , stairwell
       , standingStones
       , statuesInTheDeep
@@ -864,6 +923,7 @@ allLocationCards =
       , stoneArchways
       , stoneBridge
       , strangeGeometry
+      , streetsOfCairo
       , streetsOfVenice
       , studentUnion
       , study
@@ -892,6 +952,7 @@ allLocationCards =
       , tearThroughTime
       , teatroColon
       , teetawnPassage
+      , templeCourtyard
       , templeOfRlyeh
       , templeOfTheElderThings
       , templeOfTheFang
@@ -937,6 +998,7 @@ allLocationCards =
       , theGateOfYquaa
       , theGateToHell
       , theGeistTrap
+      , theGreatAbyss
       , theGreatWebCosmicWeb
       , theGreatWebPrisonOfCocoons
       , theGreatWebTangledWeb
@@ -968,12 +1030,15 @@ allLocationCards =
       , theWhiteShip
       , throneOfBloodRedAsBloodBlackAsNight
       , throneRoom
+      , tickTockClubFuture
+      , tickTockClubPresent
       , tidalPool
       , tightTurn_a
       , tightTurn_b
       , tightTurn_c
       , timeWrackedWoods
       , tinMine
+      , tindalos
       , titanicRamp_182
       , titanicRamp_183
       , titanicRamp_184
@@ -996,6 +1061,7 @@ allLocationCards =
       , treacherousPath
       , trophyRoom
       , trophyRoomSpectral
+      , tunnelsUnderNgranek
       , twilightAbyss
       , twistedUnderbrush
       , ulthar
@@ -1010,6 +1076,7 @@ allLocationCards =
       , universityHalls
       , unmarkedTomb
       , unstableVortex
+      , untouchedVault
       , unvisitedIsleDecayedWillow
       , unvisitedIsleForsakenWoods
       , unvisitedIsleHauntedSpring
@@ -1079,6 +1146,7 @@ allLocationCards =
       , witchHouseRuins
       , xochimilco
       , yard
+      , yeOldeMagickShoppe
       , yithianOrrery
       , yourHouse
       , yuggoth
@@ -1117,6 +1185,265 @@ allLocationCards =
       , --- Queen of Ash
         undergroundCistern
       , sluiceControl
+      , --- The Blob That Ate Everything
+        theCrater
+      , researchSiteTheBlobThatAteEverything
+      , temporaryHQ
+      , fungusMound
+      , sewer
+      , bridge
+      , waterTower
+      , church
+      , oozyLakebed
+      , slimyStreets
+      , desiccatedFarmland
+      , --- By the Book
+        arkhamPoliceStationByTheBook
+      , --- Relics of the Past
+        secretPassageRelicsOfThePast
+      , innerChamber
+      , ancientHallRelicsOfThePast
+      , --- The Drowned City
+        tillinghastEsoterica
+      , hibbsRoadhouse
+      , laBellaLunaTheDrownedCity
+      , treacherousPathSlickSteps
+      , treacherousPathErodedShelf
+      , treacherousPathPrecariousClimb
+      , treacherousPathDeadlyPass
+      , treacherousPathShallowDen
+      , sunkenStairway
+      , drownedShanty
+      , shatteredRuins
+      , obsidianFoundations
+      , westernWall_11530
+      , underseaVault
+      , barrierCoreInactive
+      , barrierCoreActive
+      , abyssalTrench
+      , drownedAcropolisEphemeralRuins
+      , drownedAcropolisCollapsedRuins
+      , blastedRuinsSunkenCircle
+      , blastedRuinsCrumblingEdifices
+      , coralReefStatuaryGarden
+      , coralReefFeedingGrounds
+      , ancientGallery
+      , apiaryEntranceBeckoningLight
+      , apiaryEntranceDangerousExit
+      , fleshyPathsEasternBurrows
+      , fleshyPathsWesternBurrows
+      , growingFields
+      , churningChasm
+      , corruptedVault
+      , luminousTunnels
+      , spawningGrounds
+      , lostCampsite
+      , graspingCorridor
+      , starvingCorridor
+      , acidicCoelom
+      , centralChamber
+      , hiddenVault
+      , theGreatStair
+      , movingPlatformObservationStation
+      , coreOfTheVaultHeartOfTheMachine
+      , shroudedCistern
+      , chamberOfRecordsArm
+      , chamberOfRecordsEarth
+      , otherworldlyMechanismsObsidianBulwark
+      , otherworldlyMechanismsSluiceControl
+      , otherworldlyMechanismsGrimeCoveredGears
+      , otherworldlyMechanismsInscrutableApparatus
+      , chamberOfTheTabletUnsealed
+      , westAntechamber
+      , eastAntechamber
+      , twistingCatwalks
+      , greatLiftInactive
+      , greatLiftActive
+      , ancientAltar
+      , ringLibraryArchiveOfTheStars
+      , ringLibraryArchiveOfTheAncients
+      , loftyWalkwayArchiveOfDreams
+      , loftyWalkwayArchiveOfConflict
+      , luminousArchivesArchiveOfHistory
+      , luminousArchivesArchiveOfMemory
+      , rlyehStreets
+      , centralSpire
+      , floatingSpire
+      , westernWall_11651
+      , ancientDome
+      , easternAthenaeum
+      , westernAthenaeum
+      , obsidianCliffs
+      , suspendedReef
+      , hangingShip
+      , ancientCanyons
+      , dazzlingSkyline
+      , aerialWaterfall
+      , magneticSpires
+      , glyphOrrery
+      , dreamersRest
+      , sigilCarvedAlcoveStoryOfAmbition
+      , sigilCarvedAlcoveStoryOfResilience
+      , sigilCarvedAlcoveStoryOfInfinity
+      , sigilCarvedAlcoveStoryOfDefiance
+      , sigilCarvedAlcoveStoryOfTheVoyage
+      , tillinghastEsotericaEphemeralShop
+      , northsideTheDrownedCity
+      , downtown
+      , easttownTheDrownedCity
+      , miskatonicUniversityTheDrownedCity
+      , rivertownTheDrownedCity
+      , stMarysHospitalTheDrownedCity
+      , southside
+      , westernRooftops
+      , easternRooftops
+      -- Dark Matter (homebrew)
+      , cargoHoldDarkMatter
+      , cryosleepQuartersDarkMatter
+      , engineRoomDarkMatter_023
+      , escapePodBayDarkMatter
+      , infirmaryDarkMatter_025
+      , messHallDarkMatter
+      , shipsBridgeDarkMatter
+      , ventilationShaftDarkMatter
+      , cafeteriaDarkMatter
+      , classroomK2DarkMatter
+      , entranceHallDarkMatter
+      , gymnasiumDarkMatter
+      , biologyLabDarkMatter
+      , libraryDarkMatter
+      , schoolGroundsDarkMatter
+      , coldWastesDarkMatter
+      , crystalPeakDarkMatter
+      , iceSpiresDarkMatter
+      , landingCraftDarkMatter
+      , mainFacilityDarkMatter
+      , omniTransmittersDarkMatter
+      , qCrystalMinesDarkMatter
+      , schrodGeneratorsDarkMatter
+      , airlocksDarkMatter
+      , crewQuartersDarkMatter
+      , engineRoomDarkMatter_127
+      , flightDeckDarkMatter
+      , hydroponicsDarkMatter
+      , infirmaryDarkMatter_130
+      , shipMainframeDarkMatter
+      , telecomsDarkMatter
+      , brainStorageDarkMatter
+      , communicatorDarkMatter
+      , dreamDiagnosticsDarkMatter
+      , entranceTunnelDarkMatter
+      , memoryScannerDarkMatter
+      , realitySimulatorDarkMatter
+      , aHidingPlaceDarkMatter
+      , aMutinyDarkMatter
+      , adriftInSpaceDarkMatter
+      , anAccidentDarkMatter
+      , cityOfCatsDarkMatter
+      , feverDreamDarkMatter
+      , abandonedLanderDarkMatter
+      , surfaceOfFragmentDarkMatter
+      , bottomlessPitDarkMatter
+      , cyclopeanCavernsDarkMatter
+      , hiddenPassageDarkMatter
+      , iceCavityDarkMatter
+      , impassableRavineDarkMatter
+      , stalagmiteForestDarkMatter
+      , theTatterdemalionDarkMatter
+      , newBrooklynDarkMatter
+      , hopeDarkMatter
+      , yuggothDarkMatter
+      , theCassildaDarkMatter
+      , earthDarkMatter
+      , mountSinaiDarkMatter
+      , derelictShipDarkMatter
+      , martianRuinsDarkMatter
+      , olympusTelescopeDarkMatter
+      , moonbaseLaboratoryDarkMatter
+      , thresholdOfYuggothDarkMatter
+      -- Circus Ex Mortis (homebrew)
+      , circusGatesPathToFreedomCircusExMortis
+      , forestPassageCircusExMortis
+      , remoteCabinCircusExMortis
+      , woodlandOverlookCircusExMortis
+      , circusEncampmentCircusExMortis
+      , moonlitForestSmolderingCampfireCircusExMortis
+      , moonlitForestQuietValleyCircusExMortis
+      , moonlitForestShallowRiverCircusExMortis
+      , moonlitForestGlassyLakeCircusExMortis
+      , moonlitForestCircularGroveCircusExMortis
+      , moonlitForestMistyMarshCircusExMortis
+      , moonlitForestShadowedPathCircusExMortis
+      , moonlitForestFogBankCircusExMortis
+      , moonlitForestLabyrinthOfTreesCircusExMortis
+      , moonlitForestDeadGroveCircusExMortis
+      , ringmastersTrailerCircusExMortis
+      , crowdedRowCircusExMortis_050
+      , crowdedRowCircusExMortis_051
+      , crowdedRowCircusExMortis_052
+      , crowdedRowCircusExMortis_053
+      , secludedTentCircusExMortis_054
+      , secludedTentCircusExMortis_055
+      , secludedTentCircusExMortis_056
+      , secludedTentCircusExMortis_057
+      , campOutskirtsGuardedCloselyCircusExMortis
+      , campOutskirtsQuietForNowCircusExMortis
+      , cabooseCircusExMortis
+      , locomotiveEngineCircusExMortis
+      , boxcarCircusExMortis
+      , flatcarCircusExMortis
+      , gondolaCarCircusExMortis
+      , stockCarCircusExMortis
+      , tankCarCircusExMortis
+      , coalHopperCarCircusExMortis
+      , craneCarCircusExMortis
+      , mailCarCircusExMortis
+      , refrigeratorCarCircusExMortis
+      , reinforcedCarCircusExMortis
+      , circusEngineCircusExMortis
+      , exoticAnimalCarCircusExMortis
+      , performersCarCircusExMortis
+      , circusGatesDoorwayToDoomCircusExMortis
+      , vestibuleCircusExMortis
+      , banquetHallCircusExMortis
+      , statuaryGardensCircusExMortis
+      , privateParlorCircusExMortis
+      , collectionHallCircusExMortis
+      , upperBalconyCircusExMortis
+      , hiddenDungeonCircusExMortis
+      , manorCellarsCircusExMortis
+      , savageAltarCircusExMortis
+      , forgottenTrailCircusExMortis
+      , ritualClearingCircusExMortis
+      , foothillSlopeCircusExMortis_164
+      , foothillSlopeCircusExMortis_165
+      , foothillSlopeCircusExMortis_166
+      , foothillSlopeCircusExMortis_167
+      , mountainStreamCircusExMortis_168
+      , mountainStreamCircusExMortis_169
+      , mountainStreamCircusExMortis_170
+      , mountainStreamCircusExMortis_171
+      , openForestCircusExMortis_172
+      , openForestCircusExMortis_173
+      , openForestCircusExMortis_174
+      , shadowedWildernessCircusExMortis_175
+      , shadowedWildernessCircusExMortis_176
+      , shadowedWildernessCircusExMortis_177
+      , shadowedWildernessCircusExMortis_178
+      , shadowedWildernessCircusExMortis_179
+      , silentClearingCircusExMortis
+      , primalForestCircusExMortis
+      , highThicketCircusExMortis
+      , sparseWoodlandCircusExMortis
+      , mossyGlenCircusExMortis
+      , fallenCopseCircusExMortis
+      , animalCagesCircusExMortis
+      , carouselCircusExMortis
+      , gamesGalleryCircusExMortis
+      , performerTrailersCircusExMortis
+      , theBigTopFirstRingCircusExMortis
+      , theBigTopSecondRingCircusExMortis
+      , theBigTopThirdRingCircusExMortis
       ]
 
 allSpecialLocationCards :: Map CardCode CardDef

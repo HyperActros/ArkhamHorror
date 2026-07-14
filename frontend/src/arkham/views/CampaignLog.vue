@@ -18,9 +18,11 @@ const game = shallowRef<Arkham.Game | null>(null)
 
 const cards = computed(() => store.cards)
 
-fetchGame(props.gameId, false).then(({ game: newGame }) => {
+const refreshGame = () => fetchGame(props.gameId, false).then(({ game: newGame }) => {
   game.value = newGame
 })
+
+refreshGame()
 
 const goBack = () => router.push({ name: 'Game', params: { gameId: props.gameId } })
 
@@ -33,8 +35,8 @@ onUnmounted(() => document.removeEventListener('keydown', onKeyDown))
 </script>
 
 <template>
-  <div>
-    <CampaignLog v-if="game !== null" :game="game" :cards="cards" :player-id="game.activePlayerId">
+  <div class="campaign-log-view">
+    <CampaignLog v-if="game !== null" :game="game" :cards="cards" :player-id="game.activePlayerId" @refresh="refreshGame">
       <template #header-leading>
         <router-link :to="{ name: 'Game', params: { gameId }}" class="back-button">
           <font-awesome-icon icon="arrow-left" class="back-icon" />
@@ -46,6 +48,13 @@ onUnmounted(() => document.removeEventListener('keydown', onKeyDown))
 </template>
 
 <style scoped>
+.campaign-log-view {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+}
+
 .back-button {
   display: inline-flex;
   align-items: center;

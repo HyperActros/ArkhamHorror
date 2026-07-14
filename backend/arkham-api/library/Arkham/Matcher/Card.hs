@@ -83,6 +83,7 @@ data ExtendedCardMatcher
   | ChosenViaCustomization ExtendedCardMatcher
   | PassesCommitRestrictions ExtendedCardMatcher
   | CardWithSharedTraitToAttackingEnemy
+  | CardWithoutUniqueCopyInPlay
   | CardIdentifiedByScenarioMetaKey Key
   | ActiveCard
   | ResolvingCard
@@ -196,10 +197,15 @@ data CardMatcher
   | CardWithCardCode CardCode
   | CardWithCardCodeExact CardCodeExact
   | CardWithTitle Text
+  | CardWithTitleContaining Text
   | CardWithTrait Trait
   | CardWithId CardId
   | CardWithLevel Int
   | CardWithMaxLevel Int
+  | -- | Matches a card whose printed enemy health (fixed or per-investigator) is
+    -- at most the given value. Cards with no fixed printed health (X, *, or none)
+    -- never match. Requires the Player Count as the first Int to be able to calculate purely
+    CardWithMaxPrintedHealth Int Int
   | CardWithoutKeyword Keyword
   | CardWithKeyword Keyword
   | CardWithConcealed

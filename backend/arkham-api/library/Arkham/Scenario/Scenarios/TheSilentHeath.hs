@@ -25,7 +25,6 @@ import Arkham.Projection
 import Arkham.Resolution
 import Arkham.Scenario.Import.Lifted
 import Arkham.Scenarios.TheSilentHeath.Helpers
-import Arkham.Story.Cards qualified as Stories
 import Arkham.Trait (Trait (Cave, Elite, Insect, Lair))
 
 newtype TheSilentHeath = TheSilentHeath ScenarioAttrs
@@ -73,22 +72,33 @@ instance RunMessage TheSilentHeath where
         _ -> story $ i18nWithTitle "intro4"
       pure s
     Setup -> runScenarioSetup TheSilentHeath attrs do
+      setScenarioDayAndTime
+      day <- getCampaignDay
+      time <- getCampaignTime
+
       setup $ ul do
         li "gatherSets"
         li "currentDaySet"
         li.nested "currentDayMarker" do
-          li "desolationV1"
-          li "desolationV2"
+          li.validate (day == Day1) "desolationV1"
+          li.validate (day /= Day1) "desolationV2"
         li.nested "locations" do
           li "startAt"
         li "setAside"
         li "crystalRemains"
         li "horrorsInTheRock"
-        li.nested "residents" do
-          li "leahAtwood"
-          li "drRosaMarquez"
-          li "motherRachel"
-          li "removeResidents"
+        li.nested.validate (time == Day) "residents" do
+          if time == Day
+            then do
+              li.validate (day == Day1) "leahAtwood"
+              li.validate (day == Day2) "drRosaMarquez"
+              li.validate (day == Day3) "motherRachel"
+              li "removeResidents"
+            else do
+              li "leahAtwood"
+              li "drRosaMarquez"
+              li "motherRachel"
+              li "removeResidents"
         unscoped $ li "shuffleRemainder"
         unscoped $ li "readyToBegin"
 
@@ -102,26 +112,7 @@ instance RunMessage TheSilentHeath where
       gather Set.Transfiguration
       gather Set.StrikingFear
 
-      setScenarioDayAndTime
-      day <- getCampaignDay
-      time <- getCampaignTime
-
-      case day of
-        Day1 -> do
-          gather Set.TheFirstDay
-          placeStory $ case time of
-            Day -> Stories.dayOne
-            Night -> Stories.nightOne
-        Day2 -> do
-          gather Set.TheSecondDay
-          placeStory $ case time of
-            Day -> Stories.dayTwo
-            Night -> Stories.nightTwo
-        Day3 -> do
-          gather Set.TheFinalDay
-          placeStory $ case time of
-            Day -> Stories.dayThree
-            Night -> Stories.nightThree
+      setupHemlockDay day time
 
       let
         agenda2 =
@@ -201,10 +192,12 @@ instance RunMessage TheSilentHeath where
       let entry x = scope x $ flavor $ setTitle "title" >> p.green "body"
       case n of
         1 -> do
+          codexFinished 1
           entry "motherRachel"
           increaseRelationshipLevel MotherRachel 1
           interludeXpAll (toBonus "bonus" 1)
         2 -> do
+          codexFinished 2
           entry "leahAtwood"
           record LeahSearchedThePearlRuins
           eachInvestigator \iid' -> gainClues iid' source 1
@@ -212,9 +205,11 @@ instance RunMessage TheSilentHeath where
           step <- getCurrentActStep
           if step == 1
             then do
+              codexFinishedUntilNewAct Theta
               scope "drRosaMarquez" $ flavor $ setTitle "title" >> p.green "act1"
               drawCards iid source 3
             else do
+              codexFinished Theta
               scope "drRosaMarquez" $ flavor $ setTitle "title" >> p.green "act2"
               locations <- select $ LocationWithCardsUnderneath AnyCards
               chooseTargetM iid locations \lid -> do

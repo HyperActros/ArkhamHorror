@@ -3,8 +3,9 @@ import * as Arkham from '@/arkham/types/Game'
 import { LogContents, LogKey, formatKey, logContentsDecoder } from '@/arkham/types/Log'
 import { toCapitalizedWords, formatContent } from '@/arkham/helpers'
 import { cardArt } from '@/arkham/cardImages'
-import { computed, ref, onMounted, watch, type Component } from 'vue'
-import { fetchCard } from '@/arkham/api'
+import { computed, ref, onMounted, onUnmounted, watch, type Component } from 'vue'
+import { fetchAchievements, fetchCard, fetchGameAchievements } from '@/arkham/api'
+import type { Achievement } from '@/arkham/types/Achievement'
 import type { CardDef } from '@/arkham/types/CardDef'
 import { type Name, simpleName } from '@/arkham/types/Name'
 import { scenarioToI18n, scenarioToKeyI18n, campaignIdToI18n, type Remembered } from '@/arkham/types/Scenario'
@@ -21,10 +22,16 @@ import CampaignLogSpecialRules from '@/arkham/components/CampaignLogSpecialRules
 import CampaignLogRecordedSets from '@/arkham/components/CampaignLogRecordedSets.vue'
 import CampaignLogInvestigatorSection from '@/arkham/components/CampaignLogInvestigatorSection.vue'
 import CampaignLogPartners from '@/arkham/components/CampaignLogPartners.vue'
+import { achievementCatalog } from '@/arkham/achievements'
 import CampaignLogChaosBag from '@/arkham/components/CampaignLogChaosBag.vue'
+import CampaignLogUltimatumsAndBoons from '@/arkham/components/CampaignLogUltimatumsAndBoons.vue'
+import CampaignLogAchievements from '@/arkham/components/CampaignLogAchievements.vue'
+import CampaignLogAdditionalSection from '@/arkham/components/CampaignLogAdditionalSection.vue'
+import campaignJSON from '@/arkham/data/campaigns.json'
 import { useI18n } from 'vue-i18n'
 import { useDbCardStore } from '@/stores/dbCards'
 
+import DiscoveredRunes from '@/arkham/components/TheDrownedCity/DiscoveredRunes.vue'
 import ResidentNotes from '@/arkham/components/TheFeastOfHemlockVale/ResidentNotes.vue'
 import AreasSurveyed from '@/arkham/components/TheFeastOfHemlockVale/AreasSurveyed.vue'
 import DayTimeTracker from '@/arkham/components/TheFeastOfHemlockVale/DayTimeTracker.vue'
@@ -36,11 +43,31 @@ export interface Props {
 }
 
 const props = defineProps<Props>()
+const emit = defineEmits<{ refresh: [] }>()
 const store = useDbCardStore()
 const { t, tm } = useI18n()
 
-type LogTab = 'log' | 'investigators' | 'rules'
+type LogTab = 'log' | 'investigators' | 'rules' | 'achievements' | `additional:${number}`
 const activeTab = ref<LogTab>('log')
+
+const achievements = ref<Achievement[]>([])
+// User-wide rows (any game) for checklist progress checkmarks.
+const userAchievements = ref<Achievement[]>([])
+const campaignAchievementEntries = computed(() =>
+  achievementCatalog.filter((entry) => entry.campaignId === props.game.campaign?.id)
+)
+const achievementsEnabled = computed(() =>
+  !!props.game.settings.settingsAchievementsEnabled && campaignAchievementEntries.value.length > 0
+)
+
+onMounted(() => {
+  fetchGameAchievements(props.game.id)
+    .then((rows) => { achievements.value = rows })
+    .catch(() => { achievements.value = [] })
+  fetchAchievements()
+    .then((rows) => { userAchievements.value = rows })
+    .catch(() => { userAchievements.value = [] })
+})
 
 const sectionComponentById: Record<string, Component> = {
   motherRachelNotes: ResidentNotes,
@@ -69,6 +96,20 @@ const delta = computed(() => props.game.campaign?.meta?.delta)
 const psi = computed(() => props.game.campaign?.meta?.psi)
 const scarletKeys = computed(() => props.game.campaign?.meta?.keyStatus)
 
+type AdditionalLogSection = { title: string; body: string }
+type ConfiguredLogSection = string | { id: string; baseKey?: string }
+type CampaignDefinition = { id: string; additional?: AdditionalLogSection[]; logSections?: ConfiguredLogSection[] }
+
+const campaignDefinition = computed<CampaignDefinition | null>(() => {
+  const campaignId = props.game.campaign?.id
+  if (!campaignId) return null
+  return (campaignJSON as CampaignDefinition[]).find((c) => c.id === campaignId) ?? null
+})
+
+const additionalLogSections = computed(() => campaignDefinition.value?.additional ?? [])
+const additionalTabId = (index: number): `additional:${number}` => `additional:${index}`
+const isAdditionalTab = (tab: LogTab): tab is `additional:${number}` => tab.startsWith('additional:')
+
 const hemlockDayTime = computed(() => {
   if (props.game.campaign?.id !== '10') return null
   const meta = props.game.campaign?.meta
@@ -85,6 +126,10 @@ const visibleSections = computed(() => {
   if (props.game.campaign?.id !== '10') return sections.value
   return sections.value.filter((s) => s.id !== 'areasSurveyed')
 })
+
+// --- Ultimatums and Boons variants -----------------------------------------------
+const ultimatumsAndBoonsEnabled = computed(() => props.game.settings.settingsUltimatumsAndBoonsEnabled)
+const ultimatumsAndBoons = computed(() => props.game.settings.settingsUltimatumsAndBoons)
 
 // --- Determine available logs & titles -----------------------------------------
 const mainLog = computed<LogContents>(() => props.game.campaign?.log || props.game.scenario?.standaloneCampaignLog || EMPTY_LOG)
@@ -228,6 +273,12 @@ watch(hasRules, (has) => {
   if (!has && activeTab.value === 'rules') activeTab.value = 'log'
 })
 
+watch(additionalLogSections, (sections) => {
+  if (!isAdditionalTab(activeTab.value)) return
+  const index = Number(activeTab.value.split(':')[1])
+  if (!Number.isInteger(index) || index < 0 || index >= sections.length) activeTab.value = 'log'
+})
+
 const allGameInvestigators = computed(() => ({
   ...props.game.investigators,
   ...props.game.killedInvestigators,
@@ -276,7 +327,9 @@ type SectionModel = {
   id: string
   titleKey: string
   orderKey: string
+  prefix: string
   records: string[]
+  recordCounts: Record<string, number>
   relationshipLevel: number
   component?: Component
 }
@@ -293,6 +346,26 @@ const relationshipLevelBySectionId = computed<Record<string, number>>(() => {
     if (!/RelationshipLevel$/.test(leafTag)) continue
 
     m[sectionId] = clamp6(value)
+  }
+
+  return m
+})
+
+const recordCountsBySectionId = computed<Record<string, Record<string, number>>>(() => {
+  const m: Record<string, Record<string, number>> = {}
+
+  for (const [k, value] of selectedLog.value.recordedCounts) {
+    if (!isSection(k)) continue
+    const sectionTag = k.contents.tag
+    const leafTag = k.contents.contents
+    if (/RelationshipLevel$/.test(leafTag)) continue
+
+    const baseKey = lowerFirst(k.tag.replace(/Key$/, ''))
+    const sectionId = lowerFirst(sectionTag)
+    const leaf = lowerFirst(leafTag)
+    const recordKey = `${baseKey}.key['[${sectionId}]'].${leaf}`
+
+    m[sectionId] = { ...(m[sectionId] ?? {}), [recordKey]: value }
   }
 
   return m
@@ -348,7 +421,9 @@ const sections = computed<SectionModel[]>(() => {
       id: sectionId,
       titleKey,
       orderKey,
+      prefix: baseKey,
       records: [recordKey],
+      recordCounts: recordCountsBySectionId.value[sectionId] ?? {},
       relationshipLevel: relationshipLevelBySectionId.value[sectionId] ?? 0,
       component: sectionComponentById[sectionId],
     }
@@ -357,6 +432,7 @@ const sections = computed<SectionModel[]>(() => {
   for (const [key, meta] of Object.entries(sectionsFromCounts.value)) {
     const existing = byKey[key]
     if (existing) {
+      existing.recordCounts = recordCountsBySectionId.value[existing.id] ?? existing.recordCounts
       existing.relationshipLevel = relationshipLevelBySectionId.value[existing.id] ?? existing.relationshipLevel
       continue
     }
@@ -366,9 +442,34 @@ const sections = computed<SectionModel[]>(() => {
       id: meta.id,
       titleKey: meta.titleKey,
       orderKey: meta.orderKey,
+      prefix: meta.baseKey,
       records: [],
+      recordCounts: recordCountsBySectionId.value[meta.id] ?? {},
       relationshipLevel: relationshipLevelBySectionId.value[meta.id] ?? 0,
       component: sectionComponentById[meta.id],
+    }
+  }
+
+  for (const entry of campaignDefinition.value?.logSections ?? []) {
+    const id = typeof entry === 'string' ? entry : entry.id
+    const baseKey = typeof entry === 'string'
+      ? (props.game.campaign ? campaignIdToI18n(props.game.campaign.id) : '')
+      : (entry.baseKey ?? (props.game.campaign ? campaignIdToI18n(props.game.campaign.id) : ''))
+    if (!baseKey) continue
+
+    const key = `${baseKey}:${id}`
+    if (byKey[key]) continue
+
+    byKey[key] = {
+      key,
+      id,
+      titleKey: t(`${baseKey}.key['[${id}]'].title`),
+      orderKey: t(`${baseKey}.key['[${id}]'].orderKey`),
+      prefix: baseKey,
+      records: [],
+      recordCounts: recordCountsBySectionId.value[id] ?? {},
+      relationshipLevel: relationshipLevelBySectionId.value[id] ?? 0,
+      component: sectionComponentById[id],
     }
   }
 
@@ -435,6 +536,7 @@ const NON_CARD_KEYS = new Set([
   'edgeOfTheEarth.key.suppliesRecovered',
   'edgeOfTheEarth.key.sealsPlaced',
   'edgeOfTheEarth.key.sealsRecovered',
+  'theDrownedCity.key.discoveredGlyphs',
 ])
 
 const findCard = (cardCode: string): CardDef | undefined =>
@@ -538,6 +640,7 @@ const emptyLog = computed(() => {
   if (hasSupplies.value) return false
   if (recorded.value.length > 0) return false
   if (remembered.value.length > 0) return false
+  if (visibleSections.value.length > 0) return false
   if (Object.entries(recordedSets.value ?? {}).length > 0) return false
   return true
 })
@@ -592,11 +695,31 @@ const mapData = computed(() => {
     locations,
   }
 })
+
+// --- Back-to-top (the .content element is the scroll container) ---------------
+const contentEl = ref<HTMLElement | null>(null)
+const showBackToTop = ref(false)
+
+const onContentScroll = () => {
+  showBackToTop.value = (contentEl.value?.scrollTop ?? 0) > 400
+}
+
+const scrollToTop = () => {
+  contentEl.value?.scrollTo({ top: 0, behavior: 'smooth' })
+}
+
+onMounted(() => {
+  contentEl.value?.addEventListener('scroll', onContentScroll, { passive: true })
+})
+
+onUnmounted(() => {
+  contentEl.value?.removeEventListener('scroll', onContentScroll)
+})
 </script>
 
 <template>
   <LogIcons />
-  <div class="content column">
+  <div class="content column" ref="contentEl">
     <div class="log-column">
       <div class="campaign-log column">
         <div class="campaign-log-header">
@@ -621,6 +744,19 @@ const mapData = computed(() => {
             :class="{ active: activeTab === 'rules' }"
             @click="activeTab = 'rules'"
           >{{ t('campaignLog.tabs.rules') }}</button>
+          <button
+            v-if="achievementsEnabled"
+            type="button"
+            :class="{ active: activeTab === 'achievements' }"
+            @click="activeTab = 'achievements'"
+          >{{ t('achievements.tabTitle') }}</button>
+          <button
+            v-for="(section, index) in additionalLogSections"
+            :key="section.title"
+            type="button"
+            :class="{ active: activeTab === additionalTabId(index) }"
+            @click="activeTab = additionalTabId(index)"
+          >{{ t(section.title) }}</button>
         </nav>
 
         <div v-show="activeTab === 'investigators'" class="investigators-log">
@@ -650,6 +786,21 @@ const mapData = computed(() => {
             v-if="keywordsAndConcepts"
             :title="keywordsAndConcepts.title"
             :rules="keywordsAndConcepts.rules"
+          />
+        </template>
+
+        <CampaignLogAchievements
+          v-if="activeTab === 'achievements'"
+          :achievements="achievements"
+          :user-achievements="userAchievements"
+          :campaign-id="game.campaign?.id"
+        />
+
+        <template v-for="(section, index) in additionalLogSections" :key="section.title">
+          <CampaignLogAdditionalSection
+            v-if="activeTab === additionalTabId(index)"
+            :title="t(section.title)"
+            :bodyKey="section.body"
           />
         </template>
 
@@ -707,21 +858,34 @@ const mapData = computed(() => {
               v-if="hemlockDayTime"
               :day="hemlockDayTime.day"
               :time="hemlockDayTime.time"
+              :meta="game.campaign?.meta"
+              :gameId="game.id"
+              @refresh="emit('refresh')"
             />
             <component
               v-if="hemlockAreasSurveyedSection"
               :is="hemlockAreasSurveyedSection.component"
               class="hemlock-overview-grow"
               :sectionId="hemlockAreasSurveyedSection.id"
-              :prefix="hemlockAreasSurveyedSection.titleKey.split('.').slice(0, 1).join('.')"
+              :prefix="hemlockAreasSurveyedSection.prefix"
               :records="hemlockAreasSurveyedSection.records"
+              :recordCounts="hemlockAreasSurveyedSection.recordCounts"
               :relationshipLevel="hemlockAreasSurveyedSection.relationshipLevel"
+              :gameId="game.id"
+              @refresh="emit('refresh')"
             />
           </div>
 
           <CampaignLogChaosBag
             v-if="chaosBag.length > 0"
             :chaosBag="chaosBag"
+          />
+
+          <CampaignLogUltimatumsAndBoons
+            v-if="ultimatumsAndBoons.length > 0"
+            :entries="ultimatumsAndBoons"
+            :enabled="ultimatumsAndBoonsEnabled"
+            :rolled="game.settings.settingsRolledUltimatumOrBoon"
           />
 
           <CampaignLogSection
@@ -736,9 +900,12 @@ const mapData = computed(() => {
               v-if="section.component"
               :is="section.component"
               :sectionId="section.id"
-              :prefix="section.titleKey.split('.').slice(0, 1).join('.')"
+              :prefix="section.prefix"
               :records="section.records"
+              :recordCounts="section.recordCounts"
               :relationshipLevel="section.relationshipLevel"
+              :gameId="game.id"
+              @refresh="emit('refresh')"
             />
             <CampaignLogSection
               v-else
@@ -757,9 +924,11 @@ const mapData = computed(() => {
             :displayRecordValue="displayRecordValue"
           />
 
+          <DiscoveredRunes v-if="game.campaign?.id === '11'" :log="selectedLog" :game-id="game.id" @refresh="emit('refresh')" />
+
           <!-- Campaign recorded sets + counts -->
           <CampaignLogRecordedSets
-            :entries="Object.entries(recordedSets)"
+            :entries="(Object.entries(recordedSets) as [string, any[]][]).filter(([k]) => !k.toLowerCase().includes('discoveredglyph'))"
             :counts="recordedCounts"
             :displayRecordValue="displayRecordValue"
           />
@@ -787,6 +956,18 @@ const mapData = computed(() => {
         />
       </template>
     </div>
+
+    <button
+      type="button"
+      class="back-to-top"
+      :class="{ visible: showBackToTop }"
+      :aria-hidden="!showBackToTop"
+      :tabindex="showBackToTop ? 0 : -1"
+      :title="t('campaignLog.backToTop')"
+      @click="scrollToTop"
+    >
+      <font-awesome-icon :icon="['fas', 'arrow-up']" />
+    </button>
   </div>
 </template>
 
@@ -794,9 +975,69 @@ const mapData = computed(() => {
 /* ── Page ────────────────────────────────────────────────── */
 
 .content {
-  overflow: auto;
+  flex: 1;
+  min-height: 0;
   width: 100%;
+  overflow: auto;
   padding-bottom: 60px;
+  box-sizing: border-box;
+}
+
+.back-to-top {
+  position: sticky;
+  bottom: 18px;
+  align-self: flex-end;
+  margin-right: 18px;
+  /* last child: overlay the bottom padding instead of adding scroll height */
+  margin-bottom: -48px;
+  flex: none;
+  width: 42px;
+  height: 42px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  cursor: pointer;
+  color: rgba(255, 255, 255, 0.9);
+  background: #2b3140;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.45);
+  z-index: var(--z-index-100);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(10px);
+  transition:
+    opacity 0.2s ease,
+    transform 0.2s ease,
+    background 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease;
+}
+
+.back-to-top :deep(svg) {
+  width: 15px;
+  height: 15px;
+}
+
+.back-to-top.visible {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
+}
+
+.back-to-top:hover {
+  background: var(--spooky-green);
+  border-color: var(--spooky-green);
+  color: #1b1f29;
+}
+
+.back-to-top:active {
+  transform: translateY(1px) scale(0.97);
+}
+
+.back-to-top:focus-visible {
+  outline: none;
+  border-color: var(--spooky-green);
 }
 
 /* ── Tabs ────────────────────────────────────────────────── */
@@ -830,7 +1071,7 @@ const mapData = computed(() => {
 
 .log-tabs button.active {
   color: var(--title);
-  border-bottom-color: var(--select, #6E8640);
+  border-bottom-color: var(--select, var(--button-1));
 }
 
 /* ── Investigators ───────────────────────────────────────── */

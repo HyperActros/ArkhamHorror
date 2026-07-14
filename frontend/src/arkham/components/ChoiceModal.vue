@@ -61,7 +61,14 @@ const choicesRequireModal = computed(() => choices.value.some(choiceRequiresModa
 
 const tokenChoices = computed(() => props.game.scenario?.chaosBag.choice)
 
+const damageAssignmentTokens = computed(() => ArkhamGame.damageAssignmentTokens(props.game, props.playerId))
+
 const requiresModal = computed(() => {
+  // Damage/horror assignment is done by clicking cards; show the pending tokens
+  // on the investigator instead of popping the choice modal.
+  if (damageAssignmentTokens.value) {
+    return false
+  }
   if (props.noStory && question.value?.tag === QuestionType.READ) {
     return false
   }
@@ -141,7 +148,12 @@ const title = computed(() => {
 </script>
 
 <template>
-  <Draggable v-if="requiresModal">
+  <Draggable
+    v-if="requiresModal"
+    center-in-selector=".scenario-body"
+    avoid-selector=".location-cell--can-interact, .location-cell--can-interact .location-wrapper, .location-cell--can-interact .card-frame"
+    click-through-chrome
+  >
     <template #handle><h1 v-html="label(title)"></h1></template>
     <div class='choice-modal-wrapper'>
       <p class="body" v-if="body" v-html="label(body)"></p>

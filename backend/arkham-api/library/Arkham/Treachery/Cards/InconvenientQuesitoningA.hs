@@ -21,11 +21,13 @@ inconvenientQuesitoningA = treachery InconvenientQuesitoningA Cards.inconvenient
 instance RunMessage InconvenientQuesitoningA where
   runMessage msg t@(InconvenientQuesitoningA attrs) = runQueueT $ case msg of
     Revelation iid (isSource attrs -> True) -> do
-      enemies <- select $ NearestEnemyTo iid $ InPlayEnemy $ EnemyWithTrait Casino <> not_ UniqueEnemy
+      enemies <- select $ NearestEnemyTo iid $ EnemyWithTrait Casino <> not_ UniqueEnemy
       if null enemies
         then gainSurge attrs
         else do
-          withLocationOf iid \loc -> chooseTargetM iid enemies \x -> moveTowards attrs x loc
+          withLocationOf iid \loc -> chooseTargetM iid enemies \x -> do
+            moveTowards attrs x loc
+            enemyCheckEngagement x
           sid <- getRandom
           revelationSkillTest sid iid attrs #intellect (Fixed 3)
       pure t

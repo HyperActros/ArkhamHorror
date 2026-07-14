@@ -870,6 +870,15 @@ allTreacheries =
       , SomeTreacheryCard mesmerize
       , SomeTreacheryCard abduction
       , SomeTreacheryCard acridMiasma
+      , --- Sands of Egypt
+        SomeTreacheryCard eclipse
+      , SomeTreacheryCard sandstorm
+      , SomeTreacheryCard terrorUnderThePyramids
+      , SomeTreacheryCard swarmOfLocusts
+      , SomeTreacheryCard slumber
+      , SomeTreacheryCard darkSacrifice
+      , SomeTreacheryCard theBlackWind
+      , SomeTreacheryCard abyssalReach
       , --- Murder at the Excelsior Hotel
         SomeTreacheryCard whatHaveYouDone
       , SomeTreacheryCard noxiousFumes
@@ -1007,4 +1016,94 @@ allTreacheries =
       , SomeTreacheryCard torment
       , SomeTreacheryCard markOfElokoss
       , SomeTreacheryCard ashenRebirth
+      , -- The Blob That Ate Everything
+        SomeTreacheryCard realityAcid
+      , SomeTreacheryCard devouringOoze
+      , SomeTreacheryCard corrosiveSlime
+      , SomeTreacheryCard consumingMaw
+      , SomeTreacheryCard waveOfOoze
+      , SomeTreacheryCard causticDissemination
+      , SomeTreacheryCard stickyFeet
+      , SomeTreacheryCard replication
+      , SomeTreacheryCard itsGotMe
+      , SomeTreacheryCard alienFoodChain
+      , -- War of the Outer Gods
+        SomeTreacheryCard deathAndDecay
+      , SomeTreacheryCard predatorsCall
+      , SomeTreacheryCard feastOfLocusts
+      , SomeTreacheryCard hellfireWarOfTheOuterGods
+      , SomeTreacheryCard ravagesOfWar
+      , SomeTreacheryCard whileTheySleep
+      , -- The Labyrinths of Lunacy
+        SomeTreacheryCard unnaturalWeariness
+      , SomeTreacheryCard poisonousGas
+      , SomeTreacheryCard dreadfulMechanism
+      , SomeTreacheryCard bloodAndRust
+      , SomeTreacheryCard paradoxEffect
+      , SomeTreacheryCard harvestedPain
+      , -- Machinations Through Time
+        SomeTreacheryCard aTearInTimeMachinationsThroughTime
+      , SomeTreacheryCard abducted
+      , SomeTreacheryCard brokenSpace
+      , SomeTreacheryCard dimensionalBreach
+      , SomeTreacheryCard fromAllAngles
+      , SomeTreacheryCard lostInTimeMachinationsThroughTime
+      , SomeTreacheryCard mergingTimelinesMachinationsThroughTime
+      , SomeTreacheryCard openPortal
+      , SomeTreacheryCard temporalDistortion
+      , SomeTreacheryCard vanishingHistory
+      , -- Death of Stars
+        SomeTreacheryCard inevitableEnd
+      , -- Children of Paradise
+        SomeTreacheryCard huntDown
+      , -- Swarm of Assimilation
+        SomeTreacheryCard transmogrify
+      , -- Relics of the Past
+        SomeTreacheryCard vengeantPast
+      , --- The Drowned City
+        SomeTreacheryCard caughtInTheCrossfire
+      , SomeTreacheryCard endOfNegotiations
+      , SomeTreacheryCard torturedVisions
+      , SomeTreacheryCard drawnToDarkness
+      , SomeTreacheryCard seafloorFrieze
+      , SomeTreacheryCard lookOut
+      , SomeTreacheryCard hungryWalls
+      , SomeTreacheryCard dangerousCuriosity
+      , SomeTreacheryCard alienEggs
+      , SomeTreacheryCard parasiticTransformation
+      , SomeTreacheryCard deadlyMechanisms
+      , SomeTreacheryCard ancientVaultO
+      , SomeTreacheryCard ancientVaultN
+      , SomeTreacheryCard ancientVaultP
+      , SomeTreacheryCard ancientVaultG
+      , SomeTreacheryCard ancientVaultI
+      , SomeTreacheryCard ruinedOrrery
+      , SomeTreacheryCard cosmicOmen
+      , SomeTreacheryCard erodedFrieze
+      , SomeTreacheryCard stElmosFire
+      , SomeTreacheryCard acrophobia
+      , SomeTreacheryCard wingsOfTerror
+      , SomeTreacheryCard lostInTheClouds
+      , SomeTreacheryCard layWaste
+      , SomeTreacheryCard eyesOfYchlecht
+      , SomeTreacheryCard grossPlasticity
+      , SomeTreacheryCard arkhamUnderAssault
+      , SomeTreacheryCard infected
+      , SomeTreacheryCard eyeOfTheDeep
+      , SomeTreacheryCard cunningMimicry
+      , SomeTreacheryCard elderMist
+      , SomeTreacheryCard corrosiveFog
+      , SomeTreacheryCard dreamingMigration
+      , SomeTreacheryCard underseaHunt
+      , SomeTreacheryCard deadlyTorrent
+      , SomeTreacheryCard somethingInTheWater
+      , SomeTreacheryCard ominousSilence
+      , SomeTreacheryCard cyclopeanArchitecture
+      , SomeTreacheryCard crumblingMasonry
+      , SomeTreacheryCard cthulhuFhtagn
+      , SomeTreacheryCard oppressiveInfluence
+      , SomeTreacheryCard domination
+      , SomeTreacheryCard stillBehindYou
+      , SomeTreacheryCard deepOneAmbush
+      , SomeTreacheryCard infernalMachinery
       ]

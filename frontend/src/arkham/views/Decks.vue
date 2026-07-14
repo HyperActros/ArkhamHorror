@@ -80,7 +80,7 @@ async function sync(deck: Arkham.Deck) {
     <div id="decks">
       <header class="decks-header">
         <h2>{{ $t('decks') }}</h2>
-        <PrimaryButton :label="showNewDeck ? t('cancel') : t('newDeck')" :danger="showNewDeck" @click="showNewDeck = !showNewDeck" />
+        <PrimaryButton :label="showNewDeck ? t('cancel') : t('deckList.newDeck')" :danger="showNewDeck" @click="showNewDeck = !showNewDeck" />
       </header>
 
       <div v-if="showNewDeck" class="new-deck-panel">
@@ -123,11 +123,12 @@ async function sync(deck: Arkham.Deck) {
   max-width: 98vw;
   min-width: 60vw;
   margin: 0 auto;
-  padding: 0 20px;
+  box-sizing: border-box;
+  padding: 20px 20px 10px;
   @media (max-width: 768px) {
     width: 100%;
     min-width: unset;
-    padding: 0 12px;
+    padding: 20px 12px 10px;
     box-sizing: border-box;
   }
 }
@@ -167,7 +168,7 @@ async function sync(deck: Arkham.Deck) {
 .empty-state {
   padding: 40px;
   text-align: center;
-  color: #555;
+  color: var(--button);
   font-size: 0.9rem;
 }
 

@@ -17,6 +17,9 @@ import Arkham.Treachery.CardDefs.TheForgottenAge as X
 import Arkham.Treachery.CardDefs.TheInnsmouthConspiracy as X
 import Arkham.Treachery.CardDefs.ThePathToCarcosa as X
 import Arkham.Treachery.CardDefs.TheScarletKeys as X
+import Arkham.Treachery.CardDefs.RelicsOfThePast as X
+import Arkham.Treachery.CardDefs.DarkMatter as X
+import Arkham.Treachery.CardDefs.CircusExMortis as X
 
 import Arkham.Card.CardCode
 import Arkham.Card.CardDef
@@ -65,7 +68,6 @@ allPlayerTreacheryCards =
       , disruptivePoltergeist
       , doomed
       , downAndOut
-      , downpour
       , drawingTheSign
       , dreadCurse
       , dreamsOfTheFlood
@@ -102,6 +104,7 @@ allPlayerTreacheryCards =
       , paradimensionalUnderstanding
       , paranoia
       , poisoned
+      , frostbitten
       , possessed
       , prophecyOfTheEnd
       , psychosis
@@ -159,6 +162,8 @@ allPlayerTreacheryCards =
       , calledToGuinee
       , hemophobia
       , markOfElokoss
+      -- Dark Matter (homebrew)
+      , desyncDarkMatter
       ]
 
 allEncounterTreacheryCards :: Map CardCode CardDef
@@ -169,7 +174,9 @@ allEncounterTreacheryCards =
       [ aBalefulWelcome
       , abandonedByTheGods
       , abandonedToMadness
+      , abducted
       , abduction
+      , abyssalReach
       , accosted
       , acridMiasma
       , action
@@ -189,6 +196,7 @@ allEncounterTreacheryCards =
       , arousingSuspicions
       , arrowsFromTheTrees
       , aTearInTime
+      , aTearInTimeMachinationsThroughTime
       , attractingAttention
       , avalanche
       , avariceCallsA
@@ -211,6 +219,7 @@ allEncounterTreacheryCards =
       , bleedingWallsTheMidwinterGala
       , bleedingWallsTheMidwinterGala
       , blindsense
+      , bloodAndRust
       , bloodOnYourHands
       , bloodthirstySpirits
       , bloom
@@ -219,6 +228,7 @@ allEncounterTreacheryCards =
       , brazierEnchantment
       , breakALeg
       , brokenRails
+      , brokenSpace
       , bumpyRide
       , burdensOfThePast
       , calcification
@@ -267,6 +277,7 @@ allEncounterTreacheryCards =
       , danceOfTheYellowKing
       , darkAurora
       , darkBidding
+      , darkSacrifice
       , dawningOfTheTruth
       , deadlyFate
       , deathApproaches
@@ -283,6 +294,7 @@ allEncounterTreacheryCards =
       , despoiled
       , dholeTunnel
       , diabolicVoices
+      , dimensionalBreach
       , dimensionalHypnosisA
       , dimensionalHypnosisB
       , dimensionalHypnosisC
@@ -290,8 +302,10 @@ allEncounterTreacheryCards =
       , disquietingDreams
       , dissonantVoices
       , distortedReasoning
+      , downpour
       , draggedUnder
       , draggedUnderDevilReef
+      , dreadfulMechanism
       , dreamersCurse
       , dreamlandsEclipse
       , dreamsOfRlyeh
@@ -299,11 +313,16 @@ allEncounterTreacheryCards =
       , eagerForDeath
       , eagerForDeath2
       , eagerForDeathUnionAndDisillusion
+      , eclipse
       , eldritchAccord
       , empyreanBrilliance
       , encephalonSignal
       , endlessDescent
       , endlessNight
+      , harvestedPain
+      , paradoxEffectEpicMultiplayer
+      , paradoxEffect
+      , poisonousGas
       , sublimation
       , fragmentation
       , euphoria
@@ -335,10 +354,10 @@ allEncounterTreacheryCards =
       , foundFootage
       , fracturedConsciousness
       , fragileThoughts
+      , fromAllAngles
       , fromAnotherTime
       , fromTheDepths
       , fromTheOtherSide
-      , frostbitten
       , frozenInFear
       , frozenInFearAPhantomOfTruth
       , fulfillTheOaths
@@ -413,6 +432,7 @@ allEncounterTreacheryCards =
       , lostInTheWilds
       , lostInTheWoods
       , lostInTime
+      , lostInTimeMachinationsThroughTime
       , lostInVenice
       , lowOnSupplies
       , lunarPatrol
@@ -434,6 +454,7 @@ allEncounterTreacheryCards =
       , memoryOfOblivion
       , memoryVariant
       , mergingTimelines
+      , mergingTimelinesMachinationsThroughTime
       , mesmerize
       , miasmaticTorment
       , mindExtraction
@@ -460,6 +481,7 @@ allEncounterTreacheryCards =
       , onTheProwl
       , onWingsOfDarkness
       , oozeAndFilth
+      , openPortal
       , oppressiveMists
       , otherworldlyVisions
       , outOfTheWalls
@@ -513,6 +535,17 @@ allEncounterTreacheryCards =
       , rottingRemains
       , rottingRemainsBloodOnTheAltar
       , ruinAndDestruction
+      , sandstorm
+      , deathAndDecay
+      , predatorsCall
+      , feastOfLocusts
+      , hellfireWarOfTheOuterGods
+      , ravagesOfWar
+      , unnaturalWeariness
+      , whileTheySleep
+      , inevitableEnd
+      , huntDown
+      , transmogrify
       , secretDoor
       , secretDoorTheMidwinterGala
       , secretGathering
@@ -532,6 +565,7 @@ allEncounterTreacheryCards =
       , shockingDisplay
       , sickeningWebs
       , slitheringBehindYou
+      , slumber
       , snakeBite
       , snakescourge
       , snowfall
@@ -560,16 +594,20 @@ allEncounterTreacheryCards =
       , suspiciousGazeB
       , suspiciousGazeC
       , swarm
+      , swarmOfLocusts
       , swiftRetreat
       , syzygy
       , takenCaptive
       , tasteOfLifeblood
+      , temporalDistortion
       , tenebrousEclipse
       , terrorFromBeyond
       , terrorGate
       , terrorInTheNight
+      , terrorUnderThePyramids
       , terrorUnleashed
       , thalassophobia
+      , theBlackWind
       , theCreaturesTracks
       , theCultsSearch
       , theEndIsNigh
@@ -616,6 +654,7 @@ allEncounterTreacheryCards =
       , unstableEnergies
       , unnaturalGrowth
       , vampiresKiss
+      , vanishingHistory
       , vastExpanse
       , vaultOfEarthlyDemise
       , viceAndVillainy
@@ -691,4 +730,176 @@ allEncounterTreacheryCards =
       , ashenRebirth
       , sinkingSludge
       , groundDisturbance
+      , --- The Blob That Ate Everything
+        realityAcid
+      , devouringOoze
+      , corrosiveSlime
+      , consumingMaw
+      , waveOfOoze
+      , causticDissemination
+      , stickyFeet
+      , replication
+      , itsGotMe
+      , alienFoodChain
+      , --- Relics of the Past
+        vengeantPast
+      , --- The Drowned City
+        caughtInTheCrossfire
+      , endOfNegotiations
+      , torturedVisions
+      , drawnToDarkness
+      , seafloorFrieze
+      , lookOut
+      , hungryWalls
+      , dangerousCuriosity
+      , alienEggs
+      , parasiticTransformation
+      , deadlyMechanisms
+      , ancientVaultO
+      , ancientVaultN
+      , ancientVaultP
+      , ancientVaultG
+      , ancientVaultI
+      , ruinedOrrery
+      , cosmicOmen
+      , erodedFrieze
+      , stElmosFire
+      , acrophobia
+      , wingsOfTerror
+      , lostInTheClouds
+      , layWaste
+      , eyesOfYchlecht
+      , grossPlasticity
+      , arkhamUnderAssault
+      , infected
+      , eyeOfTheDeep
+      , cunningMimicry
+      , elderMist
+      , corrosiveFog
+      , dreamingMigration
+      , underseaHunt
+      , deadlyTorrent
+      , somethingInTheWater
+      , ominousSilence
+      , cyclopeanArchitecture
+      , crumblingMasonry
+      , cthulhuFhtagn
+      , oppressiveInfluence
+      , domination
+      , stillBehindYou
+      , deepOneAmbush
+      , infernalMachinery
+      -- Dark Matter (homebrew)
+      , anachronismDarkMatter
+      , hauntingPastDarkMatter
+      , reminiscencePledgeDarkMatter
+      , reminiscenceSecretsDarkMatter
+      , reminiscenceCovenantDarkMatter
+      , callOfTheVoidDarkMatter
+      , coldVacuumDarkMatter
+      , micrometeoroidDarkMatter
+      , theColorsOfSpaceDarkMatter
+      , grimFutureDarkMatter
+      , futureEvilsDarkMatter
+      , artificialGravityMalfunctionDarkMatter
+      , cabinPressureDarkMatter
+      , coolantLeakDarkMatter
+      , decompressionDarkMatter
+      , highRadiationLevelsDarkMatter
+      , allSeeingEyeDarkMatter
+      , electricSurgeDarkMatter
+      , hallucinatoryHologramsDarkMatter
+      , predictiveAlgorithmDarkMatter
+      , digitalCorrosionDarkMatter
+      , decoherenceDarkMatter
+      , duplicationDarkMatter
+      , nonEuclideanGeometryDarkMatter
+      , comeCLOSERDarkMatter
+      , rememberMEDarkMatter
+      , surpriseDarkMatter
+      , entangledDarkMatter
+      , incomprehensibleDarkMatter
+      , paradoxicalThreatDarkMatter
+      , quantumCollapseDarkMatter
+      , radioactiveDecayDarkMatter
+      , anothersWoeDarkMatter
+      , contaminationDarkMatter
+      , fromTheDarkDarkMatter
+      , hopelessDarkMatter
+      , infectionDarkMatter
+      , paleBlueDotDarkMatter
+      , perfectImitationDarkMatter
+      , scrambledDarkMatter
+      , alienAidDarkMatter
+      , closeEncountersDarkMatter
+      , innocentMishapDarkMatter
+      , lostInTranslationDarkMatter
+      , miGoExperimentsDarkMatter
+      , simulationDiscrepancyDarkMatter
+      , toxicPitsDarkMatter
+      , extraterrestrialAssaultDarkMatter
+      , darkReflectionsMalingererDarkMatter
+      , darkReflectionsMurdererDarkMatter
+      , darkReflectionsSycophantDarkMatter
+      , darkReflectionsZealotDarkMatter
+      , delusionalMadnessDarkMatter
+      , fathomlessRegretsDarkMatter
+      , forbiddingPromisesDarkMatter
+      , persistenceOfMemoryDarkMatter
+      , perspectiveSwitchDarkMatter
+      , brokenRealityDarkMatter
+      , caveCollapseDarkMatter
+      , chosenByHimDarkMatter
+      , echoesOfTassildaMatterDarkMatter
+      , echoesOfTassildaMindDarkMatter
+      , hastursDomainDarkMatter
+      , irresistibleTruthsDarkMatter
+      , madnessOfCarcosaDarkMatter
+      , sceneShiftingDarkMatter
+      , songOfYourSoulDarkMatter
+      , unstableDimensionDarkMatter
+      , alienationDarkMatter
+      , solarEclipseDarkMatter
+      , theDarkForestDarkMatter
+      , theStarsWereRightDarkMatter
+      , solarFlareDarkMatter
+      , radiantCrownDarkMatter
+      -- Circus Ex Mortis (homebrew)
+      , maddeningSpectacleCircusExMortis
+      , feralImpulsesCircusExMortis
+      , moonlightIllusionCircusExMortis
+      , closeWatchCircusExMortis
+      , keepQuietCircusExMortis
+      , violentThrashingCircusExMortis
+      , brokenCouplingsCircusExMortis
+      , focusedSabotageCircusExMortis
+      , overloadedEngineCircusExMortis
+      , ricketyRideCircusExMortis
+      , duplicitousIllusionCircusExMortis
+      , phantomBeastsCircusExMortis
+      , shadowyPerformanceCircusExMortis
+      , allThatGlittersCircusExMortis
+      , bestLeftUnsaidCircusExMortis
+      , destructiveImpulsesCircusExMortis
+      , drinkAndBeMerryCircusExMortis
+      , perfumeAndPassionCircusExMortis
+      , crashingTreesCircusExMortis
+      , silentForestCircusExMortis
+      , balefulEclipseCircusExMortis
+      , dreadOfTheNewMoonCircusExMortis
+      , hungerOfThousandsCircusExMortis
+      , ireOfShubNiggurathCircusExMortis
+      , endlessSpawnCircusExMortis
+      , milkOfShubNiggurathCircusExMortis
+      , hypnoticGlamourCircusExMortis
+      , phantasmalDeceptionCircusExMortis
+      , lunarInfluenceCircusExMortis
+      , ominousMoonlightCircusExMortis
+      , recklessStuntCircusExMortis
+      , quickerThanTheEyeCircusExMortis
+      , lostAllControlCircusExMortis
+      , wildHysteriaCircusExMortis
+      , primordialEvilsCircusExMortis
+      , denseTangleCircusExMortis
+      , lostTheTrailCircusExMortis
       ]

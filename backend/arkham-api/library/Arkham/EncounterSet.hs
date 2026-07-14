@@ -283,6 +283,19 @@ data EncounterSet
   | TheBayou
   | CurseOfTheRougarou
   | CarnevaleOfHorrors
+  | TheLabyrinthsOfLunacy
+  | LabyrinthsOfLunacySingleGroup
+  | LabyrinthsOfLunacyEpicMultiplayer
+  | TheEternalSlumber
+  | TheNightsUsurper
+  | BrotherhoodOfTheBeast
+  | SandsOfEgypt
+  | AbyssalTribute
+  | AbyssalGifts
+  | WarOfTheOuterGods
+  | DeathOfStars
+  | ChildrenOfParadise
+  | SwarmOfAssimilation
   | MurderAtTheExcelsiorHotel
   | AlienInterference
   | ExcelsiorManagement
@@ -290,10 +303,17 @@ data EncounterSet
   | VileExperiments
   | SinsOfThePast
   | TheBlobThatAteEverythingELSE
+  | TheBlobThatAteEverything
+  | MiGoIncursion
+  | BlobEpicMultiplayer
+  | BlobSingleGroup
   | FortuneAndFolly
   | FortunesChosen
   | PlanInShambles
   | TheMidwinterGala
+  | MachinationsThroughTime
+  | MachinationsThroughTimeSingleGroup
+  | MachinationsThroughTimeEpicMultiplayer
   | FilmFatale
   | CosmicJourney
   | ForgottenIsland
@@ -321,6 +341,77 @@ data EncounterSet
   | Sewers
   | SmokeAndMirrors
   | QueenOfAsh
+  | ReadOrDie
+  | AllOrNothing
+  | BadBlood
+  | ByTheBook
+  | RedTideRising
+  | LaidToRest
+  | RelicsOfThePast
+  | EnthrallingEncore
+  | -- The Drowned City
+    OneLastJob
+  | TheWesternWall
+  | TheDrownedQuarter
+  | TheApiary
+  | TheGrandVault
+  | CourtOfTheAncients
+  | ObsidianCanyons
+  | SepulchreOfTheSleeper
+  | TheDoomOfArkhamPartI
+  | TheDoomOfArkhamPartII
+  | Tasks
+  | TdcExpedition
+  | StarSpawn
+  | UnderseaCreatures
+  | Flood
+  | Domination
+  | DeepOnes
+  | Stowaways
+  | Pilgrims
+  | CosmicLegacy
+  | ElderMist
+  | Rlyeh
+  | TheInescapable
+  | Dreams
+  | AlienMachinery
+  | -- Dark Matter (homebrew)
+    DarkMatterAnachronism
+  | DarkMatterArtificialIntelligence
+  | DarkMatterDarkPast
+  | DarkMatterDeepSpace
+  | DarkMatterElectricNightmare
+  | DarkMatterEndtimes
+  | DarkMatterFragmentOfCarcosa
+  | DarkMatterHastursGaze
+  | DarkMatterInTheShadowOfEarth
+  | DarkMatterInterstellarPredators
+  | DarkMatterLostQuantum
+  | DarkMatterStarfall
+  | DarkMatterStrangeMoons
+  | DarkMatterTheBoogeyman
+  | DarkMatterTheMachineInYellow
+  | DarkMatterTheTatterdemalion
+  | -- Circus Ex Mortis (homebrew)
+    CircusExMortisAllPointsWest
+  | CircusExMortisBacchanalia
+  | CircusExMortisChildrenOfTheGoat
+  | CircusExMortisCircusGrounds
+  | CircusExMortisCultOfShubNiggurath
+  | CircusExMortisDestinyAndProphecy
+  | CircusExMortisHarmsWay
+  | CircusExMortisIllusoryTricks
+  | CircusExMortisLunaticNight
+  | CircusExMortisNewMoonDaredevils
+  | CircusExMortisNewMoonEntertainers
+  | CircusExMortisOneNightOnly
+  | CircusExMortisPanickedMasses
+  | CircusExMortisPiperAtTheGatesOfDawn
+  | CircusExMortisPrimordialEvils
+  | CircusExMortisRedSunrise
+  | CircusExMortisSavageWoods
+  | CircusExMortisThePrimrosePath
+  | CircusExMortisThousandToOne
   | Test
   deriving stock (Show, Eq, Ord, Bounded, Enum, Data)
 

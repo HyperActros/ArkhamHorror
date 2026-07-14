@@ -40,7 +40,7 @@ fleeOptions attrs iid loc = do
 instance RunMessage PredatorOrPrey where
   runMessage msg e@(PredatorOrPrey attrs) = runQueueT $ case msg of
     Revelation iid (isSource attrs -> True) -> do
-      enemies <- select $ InPlayEnemy AnyEnemy
+      enemies <- select $ AnyEnemy
       if null enemies
         then drawCardsIfCan iid attrs 1
         else do
@@ -68,11 +68,16 @@ instance RunMessage PredatorOrPrey where
 
       pure e
     HandleTargetChoice _ (isSource attrs -> True) (InvestigatorTarget iid) -> do
-      selectEach (enemyEngagedWith iid) (disengageEnemy iid)
+      enemies <- select (enemyEngagedWith iid)
+      for_ enemies (disengageEnemy iid)
       withLocationOf iid \loc -> do
         options <- fleeOptions attrs iid loc
         chooseOrRunOneM iid do
           for_ options \(enemy, dests) ->
             targeting enemy $ chooseTargetM iid dests $ moveTo attrs iid
+      -- If the investigator could not actually move away (no eligible
+      -- destination), re-check engagement so the enemy re-engages instead of
+      -- being left stranded and unengaged at the investigator's location.
+      for_ enemies enemyCheckEngagement
       pure e
     _ -> PredatorOrPrey <$> liftRunMessage msg attrs

@@ -468,11 +468,14 @@ targetIs = TargetIs . toTarget
 sourceOwnedBy :: (AsId iid, IdOf iid ~ InvestigatorId) => iid -> SourceMatcher
 sourceOwnedBy = SourceOwnedBy . InvestigatorWithId . asId
 
+sourceUsedBy :: (AsId iid, IdOf iid ~ InvestigatorId) => iid -> SourceMatcher
+sourceUsedBy = SourceUsedBy . InvestigatorWithId . asId
+
 -- ** Ability Helpers **
 
 performableAbilityWithoutActionBy :: InvestigatorId -> AbilityMatcher -> AbilityMatcher
 performableAbilityWithoutActionBy iid a =
-  PerformableAbilityBy (InvestigatorWithId iid) [ActionCostModifier (-1)] <> a
+  a <> PerformableAbilityBy (InvestigatorWithId iid) [ActionCostModifier (-1)]
 
 -- ** Replacements
 
@@ -509,7 +512,7 @@ defaultRemoveDoomMatchers =
   RemoveDoomMatchers
     { removeDoomLocations = Anywhere
     , removeDoomInvestigators = Anyone
-    , removeDoomEnemies = InPlayEnemy AnyEnemy
+    , removeDoomEnemies = AnyEnemy
     , removeDoomAssets = AnyAsset
     , removeDoomActs = AnyAct
     , removeDoomAgendas = AnyAgenda

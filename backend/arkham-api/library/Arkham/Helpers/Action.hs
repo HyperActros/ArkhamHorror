@@ -8,7 +8,7 @@ import Arkham.Card
 import Arkham.ClassSymbol
 import Arkham.Classes.HasGame
 import Arkham.Classes.Query
-import {-# SOURCE #-} Arkham.GameEnv (getAllAbilities)
+import {-# SOURCE #-} Arkham.GameEnv (getAllAbilities, getCurrentWindowTick, getEntryTicks)
 import Arkham.Helpers.Ability (getCanAffordAbility, getCanPerformAbility, isForcedAbility)
 import Arkham.Helpers.CombatTarget
 import Arkham.Helpers.Modifiers (
@@ -18,7 +18,7 @@ import Arkham.Helpers.Modifiers (
   withModifiersOf,
  )
 import {-# SOURCE #-} Arkham.Helpers.Playable (getPlayableCards)
-import Arkham.Helpers.Ref (sourceToTarget)
+import Arkham.Helpers.Ref (sourceToMaybeCard, sourceToTarget)
 import Arkham.Helpers.Source (sourceTraits)
 import {-# SOURCE #-} Arkham.Helpers.Window (windowMatches)
 import Arkham.Id
@@ -86,7 +86,8 @@ canDo iid action isFast = do
     prevents = \case
       CannotPerformAction x -> preventsAction x
       CannotTakeAction x | isFast == NotFast && ActionsAreFree `notElem` mods -> preventsAction x
-      MustTakeAction x -> not <$> preventsAction x -- reads a little weird but we want only thing things x would prevent with cannot take action
+      MustTakeAction x | isFast == NotFast -> not <$> preventsAction x -- reads a little weird but we want only thing things x would prevent with cannot take action
+      MustTakeAction _ -> pure False
       CannotDrawCards -> pure $ action == #draw
       CannotDrawCardsFromPlayerCardEffects -> pure $ action == #draw
       CannotManipulateDeck -> pure $ action == #draw
@@ -141,7 +142,9 @@ getAdditionalActions attrs = do
       _ -> []
     additionalActions = concatMap toAdditionalAction mods
 
-  pure $ filter (`notElem` investigatorUsedAdditionalActions attrs) additionalActions
+  if CannotGainAdditionalActions `elem` mods
+    then pure []
+    else pure $ filter (`notElem` investigatorUsedAdditionalActions attrs) additionalActions
 
 getActionCost :: HasGame m => InvestigatorAttrs -> [Action] -> m Int
 getActionCost attrs as = do
@@ -207,6 +210,7 @@ getActionsWith iid ws f = do
           pure $ sources & map \source -> action {abilitySource = ProxySource source base}
         _ -> pure [action]
 
+  entryTicks <- getEntryTicks
   actionsMatchingWindow <-
     if null ws
       then pure actionsWithSources
@@ -214,9 +218,30 @@ getActionsWith iid ws f = do
         let abWindow = case (abilitySource ability).location of
               Nothing -> abilityWindow ability
               Just lid -> replaceThisLocation lid (abilityWindow ability)
-        anyM
-          (\w -> windowMatches iid (abilitySource ability) w abWindow)
-          ws
+        matched <-
+          anyM
+            (\w -> windowMatches iid (abilitySource ability) w abWindow)
+            ws
+        if not matched
+          then pure False
+          else do
+            -- A forced/reaction ability may only respond to a window that
+            -- opened strictly after its source card entered play. A card that
+            -- enters during an open window cannot respond to that window's
+            -- already-occurred triggering condition (#4927).
+            isForced <- isForcedAbility iid ability
+            let isReaction = isReactionAbility ability
+            if not (isForced || isReaction)
+              then pure True
+              else
+                sourceToMaybeCard (abilitySource ability) >>= \case
+                  Nothing -> pure True
+                  Just card -> case lookup card.id entryTicks of
+                    Nothing -> pure True
+                    Just entryTick ->
+                      getCurrentWindowTick <&> \case
+                        Nothing -> True
+                        Just openTick -> openTick > entryTick
 
   let bountiesOnly = BountiesOnly `elem` investigatorModifiers
 
@@ -247,6 +272,9 @@ getActionsWith iid ws f = do
       isForced <- isForcedAbility iid ability
       let
         -- Lola Hayes: Forced abilities will always trigger
+        -- weaknesses ignore the class system (FAQ 1.35) but weakness
+        -- assets with Lola-usable activated abilities don't exist; add a
+        -- cdCardSubType exemption here (needs a source->def lookup) if one ever does
         prevents (CanOnlyUseCardsInRole role) =
           null (setFromList [role, Neutral, Mythos] `intersect` cardClasses)
             && not isForced
@@ -323,3 +351,33 @@ hasInvestigateActions
 hasInvestigateActions iid requestor window windows' = do
   abilities <- selectMap (setRequestor requestor) (#basic <> #investigate <> AbilityWindow window)
   anyM (\a -> getCanPerformAbility iid windows' $ decreaseAbilityActionCost a 1) abilities
+
+-- | Each action can count as several types (e.g. a weapon's "[action]: Fight"
+-- is both an activate action and a fight action). A streak of "different types
+-- of actions in a row" is therefore a system of distinct representatives (SDR):
+-- one distinct type assigned per action. Input is a list of the per-action type
+-- groups.
+
+-- | The longest prefix of the (newest-first) action groups that still admits an
+-- SDR, i.e. the longest run of "different types in a row".
+longestUniqueStreak :: Eq a => [[a]] -> [[a]]
+longestUniqueStreak = go []
+ where
+  go acc [] = acc
+  go acc (xs : xss)
+    | sdrExists (xs : acc) = go (xs : acc) xss
+    | otherwise = acc
+
+-- | Does a system of distinct representatives exist for these groups?
+sdrExists :: Eq a => [[a]] -> Bool
+sdrExists [] = True
+sdrExists (xs : rest) = any (\x -> sdrExists (map (filter (/= x)) rest)) xs
+
+-- | Pick one concrete SDR (a distinct representative per group), or [] if none.
+pickSDR :: Eq a => [[a]] -> [a]
+pickSDR = fromMaybe [] . go
+ where
+  go [] = Just []
+  go (xs : rest) =
+    listToMaybe . catMaybes $
+      [fmap (x :) (go (map (filter (/= x)) rest)) | x <- xs]

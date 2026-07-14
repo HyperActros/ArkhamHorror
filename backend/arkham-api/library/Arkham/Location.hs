@@ -955,7 +955,7 @@ allLocations =
     , SomeLocationCard coveredBridge
     , SomeLocationCard openWater10599b
     , --- The Twisted Hollow
-      SomeLocationCard glimmeringMeadow
+      SomeLocationCard glimmeringWoods
     , SomeLocationCard blightedGlade
     , SomeLocationCard poisonedMarsh
     , SomeLocationCard fecundThicket
@@ -1187,6 +1187,28 @@ allLocations =
     , SomeLocationCard floodedSquare
     , SomeLocationCard accademiaBridge
     , SomeLocationCard theGuardian
+    , -- The Eternal Slumber
+      SomeLocationCard streetsOfCairo
+    , SomeLocationCard cairoBazaar
+    , SomeLocationCard museumOfEgyptianAntiquities
+    , SomeLocationCard outskirtsOfCairo
+    , SomeLocationCard templeCourtyard
+    , -- The Night's Usurper
+      SomeLocationCard aDreamBetwixt
+    , SomeLocationCard theGreatAbyss
+    , SomeLocationCard tunnelsUnderNgranek
+    , SomeLocationCard stairwayToSarkomand
+    , SomeLocationCard mistFilledCaverns
+    , SomeLocationCard eldritchGate
+    , -- Sands of Egypt
+      SomeLocationCard expeditionCampGuardiansOfTheAbyss
+    , SomeLocationCard nileRiver
+    , SomeLocationCard sandsOfDashur
+    , SomeLocationCard dunesOfTheSahara
+    , SomeLocationCard untouchedVault
+    , SomeLocationCard facelessSphinx
+    , SomeLocationCard desertOasis
+    , SomeLocationCard sandsweptRuins
     , -- Murder at the Excelsior Hotel
       SomeLocationCard room225
     , SomeLocationCard suiteBalcony
@@ -1282,4 +1304,161 @@ allLocations =
     , SomeLocationCard sewerTunnelsToxicWastePit
     , SomeLocationCard undergroundCistern
     , SomeLocationCard sluiceControl
+    , -- The Blob That Ate Everything
+      SomeLocationCard theCrater
+    , SomeLocationCard researchSiteTheBlobThatAteEverything
+    , SomeLocationCard temporaryHQ
+    , SomeLocationCard fungusMound
+    , SomeLocationCard sewer
+    , SomeLocationCard bridge
+    , SomeLocationCard waterTower
+    , SomeLocationCard church
+    , SomeLocationCard oozyLakebed
+    , SomeLocationCard slimyStreets
+    , SomeLocationCard desiccatedFarmland
+    , -- War of the Outer Gods
+      SomeLocationCard arkham
+    , SomeLocationCard streetsOfProvidence
+    , SomeLocationCard athenaeumOfTheEmptySky
+    , SomeLocationCard theArcade
+    , SomeLocationCard streetsOfMontreal
+    , SomeLocationCard chateauRamezay
+    , SomeLocationCard shrineOfMaghanArkat
+    , SomeLocationCard streetsOfNewYorkCity
+    , SomeLocationCard theBurningPit
+    , SomeLocationCard thePenthouse
+    , SomeLocationCard hubDimension
+    , -- The Labyrinths of Lunacy
+      SomeLocationCard chamberOfSecretsBloodyPrison
+    , SomeLocationCard chamberOfSecretsMysteriousPrison
+    , SomeLocationCard chamberOfSecretsEnshroudedPrison
+    , SomeLocationCard chamberOfRain
+    , SomeLocationCard chamberOfSorrows
+    , SomeLocationCard chamberOfNight
+    , SomeLocationCard chamberOfRegret
+    , SomeLocationCard labyrinthineHallsFoulSmellingPath
+    , SomeLocationCard labyrinthineHallsCorpseFilledPath
+    , SomeLocationCard labyrinthineHallsOvergrownPath
+    , SomeLocationCard chamberOfHunger
+    , SomeLocationCard chamberOfDecay
+    , SomeLocationCard chamberOfRot
+    , SomeLocationCard chamberOfPoison
+    , SomeLocationCard abandonedWarehouse
+    , -- Machinations Through Time
+      SomeLocationCard tindalos
+    , SomeLocationCard arkhamGazette
+    , SomeLocationCard oMalleysWatchShop
+    , SomeLocationCard riverDocksPast
+    , SomeLocationCard miskatonicUniversityPast
+    , SomeLocationCard childhoodHome
+    , SomeLocationCard arkhamAdvertiserPresent
+    , SomeLocationCard tickTockClubPresent
+    , SomeLocationCard riverDocksPresent
+    , SomeLocationCard miskatonicUniversityPresent
+    , SomeLocationCard yeOldeMagickShoppe
+    , SomeLocationCard arkhamAdvertiserFuture
+    , SomeLocationCard tickTockClubFuture
+    , SomeLocationCard riverDocksFuture
+    , SomeLocationCard miskatonicUniversityFuture
+    , SomeLocationCard corriganIndustries
+    , -- By the Book
+      SomeLocationCard arkhamPoliceStationByTheBook
+    , -- Relics of the Past
+      SomeLocationCard secretPassageRelicsOfThePast
+    , SomeLocationCard innerChamber
+    , SomeLocationCard ancientHallRelicsOfThePast
+    , --- The Drowned City
+      SomeLocationCard tillinghastEsoterica
+    , SomeLocationCard hibbsRoadhouse
+    , SomeLocationCard laBellaLunaTheDrownedCity
+    , SomeLocationCard treacherousPathSlickSteps
+    , SomeLocationCard treacherousPathErodedShelf
+    , SomeLocationCard treacherousPathPrecariousClimb
+    , SomeLocationCard treacherousPathDeadlyPass
+    , SomeLocationCard treacherousPathShallowDen
+    , SomeLocationCard sunkenStairway
+    , SomeLocationCard drownedShanty
+    , SomeLocationCard shatteredRuins
+    , SomeLocationCard obsidianFoundations
+    , SomeLocationCard westernWall_11530
+    , SomeLocationCard underseaVault
+    , SomeLocationCard barrierCoreInactive
+    , SomeLocationCard barrierCoreActive
+    , SomeLocationCard abyssalTrench
+    , SomeLocationCard drownedAcropolisEphemeralRuins
+    , SomeLocationCard drownedAcropolisCollapsedRuins
+    , SomeLocationCard blastedRuinsSunkenCircle
+    , SomeLocationCard blastedRuinsCrumblingEdifices
+    , SomeLocationCard coralReefStatuaryGarden
+    , SomeLocationCard coralReefFeedingGrounds
+    , SomeLocationCard ancientGallery
+    , SomeLocationCard apiaryEntranceBeckoningLight
+    , SomeLocationCard apiaryEntranceDangerousExit
+    , SomeLocationCard fleshyPathsEasternBurrows
+    , SomeLocationCard fleshyPathsWesternBurrows
+    , SomeLocationCard growingFields
+    , SomeLocationCard churningChasm
+    , SomeLocationCard corruptedVault
+    , SomeLocationCard luminousTunnels
+    , SomeLocationCard spawningGrounds
+    , SomeLocationCard lostCampsite
+    , SomeLocationCard graspingCorridor
+    , SomeLocationCard starvingCorridor
+    , SomeLocationCard acidicCoelom
+    , SomeLocationCard centralChamber
+    , SomeLocationCard hiddenVault
+    , SomeLocationCard theGreatStair
+    , SomeLocationCard movingPlatformObservationStation
+    , SomeLocationCard coreOfTheVaultHeartOfTheMachine
+    , SomeLocationCard shroudedCistern
+    , SomeLocationCard chamberOfRecordsArm
+    , SomeLocationCard chamberOfRecordsEarth
+    , SomeLocationCard otherworldlyMechanismsObsidianBulwark
+    , SomeLocationCard otherworldlyMechanismsSluiceControl
+    , SomeLocationCard otherworldlyMechanismsGrimeCoveredGears
+    , SomeLocationCard otherworldlyMechanismsInscrutableApparatus
+    , SomeLocationCard chamberOfTheTabletUnsealed
+    , SomeLocationCard westAntechamber
+    , SomeLocationCard eastAntechamber
+    , SomeLocationCard twistingCatwalks
+    , SomeLocationCard greatLiftInactive
+    , SomeLocationCard greatLiftActive
+    , SomeLocationCard ancientAltar
+    , SomeLocationCard ringLibraryArchiveOfTheStars
+    , SomeLocationCard ringLibraryArchiveOfTheAncients
+    , SomeLocationCard loftyWalkwayArchiveOfDreams
+    , SomeLocationCard loftyWalkwayArchiveOfConflict
+    , SomeLocationCard luminousArchivesArchiveOfHistory
+    , SomeLocationCard luminousArchivesArchiveOfMemory
+    , SomeLocationCard rlyehStreets
+    , SomeLocationCard centralSpire
+    , SomeLocationCard floatingSpire
+    , SomeLocationCard westernWall_11651
+    , SomeLocationCard ancientDome
+    , SomeLocationCard easternAthenaeum
+    , SomeLocationCard westernAthenaeum
+    , SomeLocationCard obsidianCliffs
+    , SomeLocationCard suspendedReef
+    , SomeLocationCard hangingShip
+    , SomeLocationCard ancientCanyons
+    , SomeLocationCard dazzlingSkyline
+    , SomeLocationCard aerialWaterfall
+    , SomeLocationCard magneticSpires
+    , SomeLocationCard glyphOrrery
+    , SomeLocationCard dreamersRest
+    , SomeLocationCard sigilCarvedAlcoveStoryOfAmbition
+    , SomeLocationCard sigilCarvedAlcoveStoryOfResilience
+    , SomeLocationCard sigilCarvedAlcoveStoryOfInfinity
+    , SomeLocationCard sigilCarvedAlcoveStoryOfDefiance
+    , SomeLocationCard sigilCarvedAlcoveStoryOfTheVoyage
+    , SomeLocationCard tillinghastEsotericaEphemeralShop
+    , SomeLocationCard northsideTheDrownedCity
+    , SomeLocationCard downtown
+    , SomeLocationCard easttownTheDrownedCity
+    , SomeLocationCard miskatonicUniversityTheDrownedCity
+    , SomeLocationCard rivertownTheDrownedCity
+    , SomeLocationCard stMarysHospitalTheDrownedCity
+    , SomeLocationCard southside
+    , SomeLocationCard westernRooftops
+    , SomeLocationCard easternRooftops
     ]

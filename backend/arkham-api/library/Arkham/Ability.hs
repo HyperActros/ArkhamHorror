@@ -156,6 +156,9 @@ withTooltip t a = a & abilityTooltipL ?~ t
 withI18nTooltip :: HasI18n => Text -> Ability -> Ability
 withI18nTooltip t a = a & abilityTooltipL ?~ scope "tooltips" (toI18n t)
 
+tooltip :: HasI18n => Text -> Ability -> Ability
+tooltip = withI18nTooltip
+
 selfAbility :: (HasCardCode a, Sourceable a) => a -> Int -> Criterion -> AbilityType -> Ability
 selfAbility a n c = restrictedAbility a n (Self <> c)
 
@@ -232,6 +235,14 @@ investigateAbility entity idx cost criteria =
     { abilityCriteria = criteria <> exists (YourLocation <> InvestigatableLocation)
     }
 
+withInvestigationTargets :: LocationMatcher -> Ability -> Ability
+withInvestigationTargets matcher =
+  delayAdditionalCostsWhen criterion
+    . restrict criterion
+    . (abilityMetadataL ?~ InvestigateTargets matcher)
+ where
+  criterion = exists $ matcher <> InvestigatableLocation
+
 investigateAbilityWith
   :: (Sourceable a, HasCardCode a) => a -> Int -> SkillType -> Cost -> Criterion -> Ability
 investigateAbilityWith entity idx stype cost criteria =
@@ -266,10 +277,10 @@ restrict :: Criterion -> Ability -> Ability
 restrict = flip withCriteria
 
 haunted :: (HasCardCode a, Sourceable a) => Text -> a -> Int -> Ability
-haunted tooltip a n = withTooltip tooltip $ mkAbility a n Haunted
+haunted t a n = withTooltip t $ mkAbility a n Haunted
 
 hauntedI :: (HasI18n, HasCardCode a, Sourceable a) => Scope -> a -> Int -> Ability
-hauntedI tooltip a n = withI18nTooltip tooltip $ mkAbility a n Haunted
+hauntedI t a n = withI18nTooltip t $ mkAbility a n Haunted
 
 cosmos :: (HasCardCode a, Sourceable a) => a -> Int -> Ability
 cosmos a n = mkAbility a n Cosmos
@@ -433,7 +444,7 @@ applyAbilityCriteriaModifiers c modifiers = foldr applyCriterionModifier c modif
     OnLocation _ -> True
     _ -> False
   replaceEngagementCheck = \case
-    EnemyIsEngagedWith _ -> AnyInPlayEnemy
+    EnemyIsEngagedWith _ -> AnyEnemy
     other -> other
   handleEnemyCriterion = \case
     EnemyExists em -> EnemyExists $ over biplate (transform replaceEngagementCheck) em
@@ -470,7 +481,7 @@ applyCostModifier cost _ = cost
 defaultAbilityWindow :: AbilityType -> WindowMatcher
 defaultAbilityWindow = \case
   FastAbility' {} -> FastPlayerWindow
-  ActionAbility {} -> Matcher.DuringTurn You
+  ActionAbility {} -> Matcher.DuringYourAction You
   ForcedAbility window -> window
   SilentForcedAbility window -> window
   ForcedAbilityWithCost window _ -> window
@@ -479,7 +490,7 @@ defaultAbilityWindow = \case
   ConstantReaction _ window _ -> window
   AbilityEffect {} -> AnyWindow
   Haunted -> AnyWindow
-  ServitorAbility _ -> Matcher.DuringTurn You
+  ServitorAbility _ -> Matcher.DuringYourAction You
   Cosmos -> AnyWindow
   Objective aType -> defaultAbilityWindow aType
   DelayedAbility aType -> defaultAbilityWindow aType

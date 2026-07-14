@@ -10,12 +10,12 @@ import Arkham.Card.Cost as X
 import Arkham.ClassSymbol as X
 import Arkham.CommitRestriction as X
 import Arkham.Cost as X
-import Arkham.EncounterSet as X hiding (Arkham, Byakhee, Dreamlands, Dunwich, Poison)
+import Arkham.EncounterSet as X hiding (Arkham, Byakhee, Dreamlands, Dunwich, Poison, Rlyeh, StarSpawn)
 import Arkham.GameValue as X
 import Arkham.Matcher as X
 import Arkham.Name as X
 import Arkham.Prelude as X
-import Arkham.Trait as X hiding (Blight, Corruption, Evidence, Expedition, Possessed, Supply)
+import Arkham.Trait as X hiding (Blight, Corruption, Evidence, Expedition, Memory, Possessed, Supply, Mutation)
 
 import Arkham.Card.CardCode (CardCode)
 import Arkham.SkillType (SkillIcon)

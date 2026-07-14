@@ -39,7 +39,7 @@ import Arkham.Matcher hiding (FastPlayerWindow, InvestigatorResigned)
 import Arkham.Message qualified as Msg
 import Arkham.Modifier
 import Arkham.Tarot
-import Arkham.Token (Token (Clue))
+import Arkham.Token (Token (Clue, Doom), addTokens)
 import Arkham.Tracing
 import Arkham.Window hiding (InvestigatorResigned)
 import Arkham.Window qualified as Window
@@ -92,13 +92,14 @@ instance RunMessage ActAttrs where
       -- This is assumed to be advancement via spending clues
       push $ AdvanceAct (toId a) (InvestigatorSource iid) AdvancedWithClues
       pure a
-    PlaceClues _ (ActTarget aid) n | aid == actId -> do
-      let totalClues = n + actClues
-      pure $ a {actClues = totalClues}
+    -- Doom is routed through the PlaceDoom handler below so it raises a
+    -- WouldPlaceDoom window (mirroring Agenda/Runner). This matters for acts
+    -- that behave as agendas (ActIsAgenda, e.g. The Final Mirage).
+    PlaceTokens _ (ActTarget aid) token n | aid == actId, token /= Doom ->
+      pure $ a & tokensL %~ addTokens token n
     MoveTokens _ (InvestigatorSource _) (ActTarget aid) Clue _ | aid == actId -> pure a
-    MoveTokens _ _ (ActTarget aid) Clue n | aid == actId -> do
-      let totalClues = n + actClues
-      pure $ a {actClues = totalClues}
+    MoveTokens _ _ (ActTarget aid) token n | aid == actId ->
+      pure $ a & tokensL %~ addTokens token n
     PlaceBreaches (isTarget a -> True) n -> do
       let total = maybe n (+ n) actBreaches
       pure $ a & breachesL ?~ total
@@ -138,4 +139,6 @@ instance RunMessage ActAttrs where
       pushM $ checkAfter $ Window.PlacedDoomCounterOnTargetWithNoDoom source (toTarget a) n
       wouldDo msg (Window.WouldPlaceDoom source (toTarget a) n) (Window.PlacedDoom source (toTarget a) n)
       pure a
+    DoBatch _ (PlaceDoom _ (isTarget a -> True) n) -> do
+      pure $ a & tokensL %~ addTokens Doom n
     _ -> pure a

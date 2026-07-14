@@ -1,18 +1,20 @@
 <script lang="ts" setup>
 import {
   computed,
+  markRaw,
+  nextTick,
   onMounted,
   onUnmounted,
   provide,
   ref,
   shallowRef,
-  useTemplateRef,
   watch,
 } from 'vue'
-import { onBeforeRouteLeave, useRouter } from 'vue-router'
+import { useToast } from 'vue-toastification'
+import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import confetti from '@/effects/confetti'
-import { useWebSocket } from '@vueuse/core'
+import { useWebSocket, useResizeObserver } from '@vueuse/core'
 import { MenuItem } from '@headlessui/vue'
 import {
   AdjustmentsHorizontalIcon,
@@ -37,21 +39,30 @@ import processingJSON from '@/assets/processing.json'
 import api from '@/api'
 import {
   fetchGame,
+  buildWebsocketUrl,
   undoChoice,
   undoScenarioChoice,
   undoAction,
   undoTurn,
   undoPhase,
   undoRound,
+  markEventReady,
+  eventTimeUp,
 } from '@/arkham/api'
 import * as Api from '@/arkham/api'
 import { useCardStore } from '@/stores/cards'
 import { useUserStore } from '@/stores/user'
+import { useEventStore } from '@/arkham/stores/event'
+import { useEventTimer } from '@/arkham/composables/useEventTimer'
+import { awaitingOrganizer, type SharedEventState } from '@/arkham/types/EpicEvent'
 import { useMenu } from '@/composable/menu'
 import useEmitter from '@/composable/useEmitter'
 import { useDebug } from '@/arkham/debug'
-import { imgsrc } from '@/arkham/helpers'
+import { useAi } from '@/arkham/ai'
+import { useSettings } from '@/stores/settings'
+import { cardImg, imgsrc } from '@/arkham/helpers'
 import { handleEmbeddedI18n } from '@/arkham/i18n'
+import { getGameLocalStorageItem, setGameLocalStorageItem } from '@/arkham/localStorage'
 import * as Arkham from '@/arkham/types/Game'
 import * as ArkhamGame from '@/arkham/types/Game'
 import {
@@ -75,9 +86,17 @@ import GameLog from '@/arkham/components/GameLog.vue'
 import HistoryPanel from '@/arkham/components/HistoryPanel.vue'
 import ScenarioSettings from '@/arkham/components/ScenarioSettings.vue'
 import Settings from '@/arkham/components/Settings.vue'
+import OrganizerBar from '@/arkham/components/OrganizerBar.vue'
+import PlayerEventBar from '@/arkham/components/PlayerEventBar.vue'
+import EventStartBarrier from '@/arkham/components/EventStartBarrier.vue'
+import EventActAdvanceBarrier from '@/arkham/components/EventActAdvanceBarrier.vue'
 import StandaloneScenario from '@/arkham/components/StandaloneScenario.vue'
+import AchievementToast from '@/arkham/components/AchievementToast.vue'
+import AiControlPanel from '@/arkham/components/AiControlPanel.vue'
+import AiQuestionsPanel from '@/arkham/components/AiQuestionsPanel.vue'
 import Draggable from '@/components/Draggable.vue'
 import Menu from '@/components/Menu.vue'
+import Prompt from '@/components/Prompt.vue'
 
 interface GameCard {
   title: string
@@ -95,12 +114,15 @@ type ServerResult =
   | { tag: 'GameError'; contents: string }
   | { tag: 'GameMessage'; contents: string }
   | { tag: 'GameTarot'; contents: string }
+  | { tag: 'GameAchievement'; contents: string }
   | { tag: 'GameCard'; contents: string }
   | { tag: 'GameCardOnly'; contents: string }
   | { tag: 'GameUpdate'; contents: string }
   | { tag: 'GameShowDiscard'; contents: string }
   | { tag: 'GameShowUnder'; contents: string }
   | { tag: 'GameUI'; contents: string }
+  | { tag: 'GameAudio'; contents: string }
+  | { tag: 'SharedStateUpdate'; contents: SharedEventState }
 
 export interface Props {
   gameId: string
@@ -110,14 +132,113 @@ export interface Props {
 const props = withDefaults(defineProps<Props>(), { spectate: false })
 
 const debug = useDebug()
+const ai = useAi()
+const settings = useSettings()
+// AI-investigator UI/driver is gated on the dev-only "AI Investigators" settings
+// flag (Settings → danger zone). The flag is itself `isDevBuild() && stored`, so
+// it is never enabled in production and defaults OFF in dev until toggled on.
+const aiDevEnabled = computed(() => settings.aiInvestigatorsEnabled)
 const emitter = useEmitter()
 const router = useRouter()
+const route = useRoute()
 const store = useCardStore()
 const userStore = useUserStore()
+const eventStore = useEventStore()
 const { addEntry, menuItems } = useMenu()
+const toast = useToast()
+
+// "Epic Multiplayer": a group's game can be entered two ways — via the dashboard's
+// per-group links (which carry an ?event=<id> query param) OR via the plain
+// join / "take a seat" path (which does NOT). To engage the event on EITHER path
+// we resolve the event id from the URL first, then fall back to the `eventId` the
+// game-fetch response now carries (resolved server-side). Everything that needs to
+// know "which event is this game a group of" keys off `resolvedEventId`; only true
+// navigation/links keep using the raw `eventQueryId`.
+const eventQueryId = computed(() => {
+  const q = route.query.event
+  return typeof q === 'string' && q !== '' ? q : null
+})
+
+// Set from the fetchGame payload's `eventId` (null for ordinary games). Lets a
+// group game engage its event even when the URL is missing ?event.
+const gamePayloadEventId = ref<string | null>(null)
+
+const resolvedEventId = computed(() => eventQueryId.value ?? gamePayloadEventId.value)
+
+const organizerEventId = computed(() => {
+  const eid = resolvedEventId.value
+  if (!eid) return null
+  const ev = eventStore.event
+  return ev && ev.id === eid && ev.role === 'organizer' ? eid : null
+})
+
+// Player-facing counterpart: any seated MEMBER (not the organizer) of an Epic
+// event may switch to / spectate the sibling groups. NOT gated on the local dev
+// flag — invited players don't have it set, but their game is still part of the
+// event server-side. Engages purely on the loaded event containing this gameId
+// (mirrors organizerEventId). Events can only be CREATED with the dev flag, so
+// there are no event games in production regardless. Organizer keeps OrganizerBar.
+const playerEventId = computed(() => {
+  const eid = resolvedEventId.value
+  if (!eid) return null
+  const ev = eventStore.event
+  if (!ev || ev.id !== eid || ev.role === 'organizer') return null
+  return ev.groups.some((g) => g.gameId === props.gameId) ? eid : null
+})
+
+watch(
+  resolvedEventId,
+  (eid) => {
+    if (!eid) return
+    if (eventStore.event?.id === eid) return
+    eventStore.load(eid).catch((e) => console.error(e))
+  },
+  { immediate: true },
+)
+
+// "Epic Multiplayer" time limit. The event id this game view actively
+// PARTICIPATES in for the timer: a seated player (or an organizer playing a
+// seat), never the organizer's spectate/non-playing view. NOT gated on the local
+// dev flag (invited players don't have it) — engages purely on the loaded event
+// containing this game as a group, so ordinary games never engage.
+const timerEventId = computed(() => {
+  if (props.spectate) return null
+  const eid = resolvedEventId.value
+  if (!eid) return null
+  const ev = eventStore.event
+  if (!ev || ev.id !== eid) return null
+  return ev.groups.some((g) => g.gameId === props.gameId) ? eid : null
+})
+
+const { hasTimeLimit, barrierPending, timerStartedAt, timeUp } = useEventTimer()
+
+// Whether an epic bar (organizer or player) is mounted above the board.
+const hasEventBar = computed(() => !!organizerEventId.value || !!playerEventId.value)
+
+// Reserve the epic bar's height in the board layout. `.game-main` is sized off a
+// hardcoded `calc(100vh - 80px)`; the bar adds height ABOVE it, so without this
+// the board's bottom (player area) is pushed past the viewport and clipped.
+// Measured (not a fixed constant) so it stays correct if the bar wraps/changes,
+// and it defaults to 0 for ordinary, non-event games — no layout shift for them.
+const epicBarRef = ref<HTMLElement | null>(null)
+const epicBarHeight = ref(0)
+useResizeObserver(epicBarRef, () => {
+  epicBarHeight.value = epicBarRef.value?.offsetHeight ?? 0
+})
+watch(hasEventBar, (present) => {
+  if (!present) epicBarHeight.value = 0
+})
+
 const preloaded = new Set<string>()
+const preloading = new Set<string>()
 let mouseX = 0
 let mouseY = 0
+let focusLightObserver: MutationObserver | null = null
+let focusLightAnimationFrame: number | null = null
+const flashlightX = ref(0)
+const flashlightY = ref(0)
+const focusLightX = ref(-1000)
+const focusLightY = ref(-1000)
 
 store.fetchCards()
 
@@ -128,7 +249,84 @@ interface PlayabilityInfo {
 }
 
 const game = shallowRef<Arkham.Game | null>(null)
+
+// "Ready to play": the group has reached the first investigation phase of an
+// active, started scenario. Cleanest signal we have off the existing game state.
+const reachedInvestigation = computed(() => {
+  const g = game.value
+  return (
+    !!g &&
+    g.gameState.tag === 'IsActive' &&
+    !!g.scenario?.started &&
+    g.phase === 'InvestigationPhase'
+  )
+})
+
+// Show the blocking start-barrier overlay only once this group has finished its own
+// setup (reached investigation) and is waiting on the other groups. Gating on
+// reachedInvestigation is essential: blocking the board during deck selection /
+// mulligan would stop the player from ever reaching investigation -> deadlock.
+const showStartBarrier = computed(
+  () => !!timerEventId.value && barrierPending.value && reachedInvestigation.value,
+)
+
+// Stage (1/2/3) of the act currently in play for this group, fed to the epic bars'
+// shared-pool readout. The Blob has a single act deck, so the lone act in
+// `game.acts` is the current one; its sequence number is the stage.
+const currentActStage = computed<number | null>(() => {
+  const acts = game.value ? Object.values(game.value.acts) : []
+  return acts.length > 0 ? acts[0].sequence.number : null
+})
+
+// Park an actively-playing member of this event's group behind a wait overlay while
+// the shared act advance for their current stage awaits the organizer's allocation.
+// Lifts as soon as the `awaiting-organizer:<stage>` gate clears (the backend pushes
+// the cleared shared state over the ws), surfacing the group's parked "Continue"
+// question for the player to click — mirrors EventStartBarrier's release.
+const showActAdvanceWait = computed(
+  () =>
+    !!timerEventId.value &&
+    currentActStage.value !== null &&
+    awaitingOrganizer(eventStore.sharedState, currentActStage.value) > 0,
+)
+
+// Mark this group ready at the start barrier exactly once per load. Guarded with a
+// local flag (the endpoint is idempotent server-side regardless). Immediate so a
+// reconnect mid-investigation still signals readiness.
+let markedReady = false
+watch(
+  [timerEventId, reachedInvestigation, barrierPending],
+  () => {
+    if (markedReady) return
+    const eid = timerEventId.value
+    if (!eid) return
+    if (!hasTimeLimit.value) return
+    if (timerStartedAt.value !== 0) return
+    if (!reachedInvestigation.value) return
+    markedReady = true
+    markEventReady(eid).catch((e) => console.error(e))
+  },
+  { immediate: true },
+)
+
+// When the countdown hits 0, force the time-up resolution once. Fires from any
+// loaded event game (player or spectating organizer); the endpoint is idempotent
+// across clients.
+let timeUpFired = false
+watch(
+  timeUp,
+  (up) => {
+    if (!up || timeUpFired) return
+    const eid = resolvedEventId.value
+    if (!eid || !hasTimeLimit.value) return
+    timeUpFired = true
+    eventTimeUp(eid).catch((e) => console.error(e))
+  },
+  { immediate: true },
+)
+
 const gameCard = ref<GameCard | null>(null)
+const showTheSilenceModal = ref(false)
 const playabilityInfo = ref<PlayabilityInfo | null>(null)
 const gameLog = shallowRef<readonly string[]>(Object.freeze([]))
 const playerId = ref<string | null>(null)
@@ -139,14 +337,15 @@ const showShortcuts = ref(false)
 const isMobileViewport = () =>
   typeof window !== 'undefined' && window.matchMedia('(max-width: 800px)').matches
 const showSidebar = ref(
-  isMobileViewport() ? false : JSON.parse(localStorage.getItem('showSidebar') ?? 'true'),
+  isMobileViewport() ? false : JSON.parse(getGameLocalStorageItem(props.gameId, 'showSidebar') ?? 'true'),
 )
 const socketError = ref(false)
 const error = ref<string | null>(null)
 const solo = ref(false)
-const showOtherPlayersHands = ref(localStorage.getItem('showOtherPlayersHands') === 'true')
+const soundsDisabled = ref(localStorage.getItem('arkhamSoundsDisabled') === 'true')
+const showOtherPlayersHands = ref(getGameLocalStorageItem(props.gameId, 'showOtherPlayersHands') === 'true')
 watch(showOtherPlayersHands, (v) => {
-  localStorage.setItem('showOtherPlayersHands', v ? 'true' : 'false')
+  setGameLocalStorageItem(props.gameId, 'showOtherPlayersHands', v ? 'true' : 'false')
 })
 const tarotCards = ref<TarotCard[]>([])
 const uiLock = ref<boolean>(false)
@@ -159,6 +358,13 @@ const { t } = useI18n()
 
 const format = (str: string) => {
   return handleEmbeddedI18n(str, t)
+}
+
+function handleSettingChange(event: Event) {
+  const detail = (event as CustomEvent<{ key?: string; value?: string }>).detail
+  if (detail?.key === 'arkhamSoundsDisabled') {
+    soundsDisabled.value = detail.value === 'true'
+  }
 }
 
 function updateGameLog(nextLog: readonly string[]) {
@@ -226,20 +432,197 @@ const choices = computed(() => {
 const gameOver = computed(() => game.value?.gameState.tag === 'IsOver')
 const question = computed(() => (playerId.value ? game.value?.question[playerId.value] : null))
 
-function skipTriggerEntries(g: Arkham.Game): { playerId: string; choiceIdx: number }[] {
-  const result: { playerId: string; choiceIdx: number }[] = []
+function questionTag(q: Question | null | undefined): string | null {
+  if (!q) return null
+  if (q.tag === 'QuestionLabel') return q.question.tag
+  return q.tag
+}
+
+const isActualScenarioView = computed(() => {
+  const g = game.value
+  if (!g?.scenario) return false
+  if (g.gameState.tag !== 'IsActive' && g.gameState.tag !== 'IsOver') return false
+  if (!g.scenario.started || g.scenario.campaignStep) return false
+  if (Object.entries(g.investigators).length === 0) return false
+
+  const activeQuestionTag = questionTag(question.value)
+  return activeQuestionTag !== 'ChooseUpgradeDeck'
+    && activeQuestionTag !== 'ChooseDeck'
+    && activeQuestionTag !== 'PickScenarioSettings'
+    && activeQuestionTag !== 'PickCampaignSettings'
+    && activeQuestionTag !== 'ContinueCampaign'
+})
+
+const realityAcidLightOverride = ref<boolean | null>(null)
+const realityAcidLightMetaActive = computed(() => {
+  const scenario = game.value?.scenario
+  return scenario?.id === 'c85001' && scenario.meta?.lightActive === true
+})
+
+const realityAcidLightActive = computed(() => realityAcidLightOverride.value ?? realityAcidLightMetaActive.value)
+
+watch(realityAcidLightMetaActive, () => {
+  realityAcidLightOverride.value = null
+})
+
+watch(question, async () => {
+  await nextTick()
+  updateFocusLight()
+})
+
+const realityAcidLightDevoured = computed(() => {
+  const scenario = game.value?.scenario
+  if (scenario?.id !== 'c85001') return false
+  return realityAcidLightMetaActive.value || scenario.meta?.lightDevoured === true || realityAcidLightOverride.value !== null
+})
+
+const toggleRealityAcidLight = () => {
+  const gameId = game.value?.id
+  if (!gameId) return
+  const active = !realityAcidLightActive.value
+  realityAcidLightOverride.value = active
+  debug.send(gameId, {
+    tag: 'ScenarioSpecific',
+    contents: ['blobSetLightActive', active],
+  })
+}
+
+const activePlayerId = computed(() => game.value?.activePlayerId ?? null)
+
+function activePlayerBelongsToCurrentPlayer(g: Arkham.Game, currentPlayerId: string) {
+  if (g.activePlayerId === currentPlayerId) return true
+  return Object.values(g.investigators).some(
+    (investigator) => investigator.id === g.activePlayerId && investigator.playerId === currentPlayerId,
+  )
+}
+
+watch(activePlayerId, (newActivePlayerId, oldActivePlayerId) => {
+  if (!newActivePlayerId || !oldActivePlayerId || newActivePlayerId === oldActivePlayerId) return
+  if (props.spectate || solo.value) return
+  if (!game.value || game.value.playerCount < 2 || !playerId.value) return
+  if (!activePlayerBelongsToCurrentPlayer(game.value, playerId.value)) return
+
+  playAudioFile('turnIndicator.ogg')
+})
+
+// --- "AI asks questions" fetch trigger (dev-only) ----------------------------
+// On a genuine old->new turn-start edge where the new active seat is an AI seat,
+// pull the AI's pending questions and merge them into the store. Gated on the
+// dev flag; guarded to the turn-start edge so it never refetch-spams. AI-target
+// questions are auto-resolved here; human-target ones render in AiQuestionsPanel.
+watch(activePlayerId, (newActivePlayerId, oldActivePlayerId) => {
+  if (!aiDevEnabled.value || props.spectate) return
+  if (!newActivePlayerId || !oldActivePlayerId || newActivePlayerId === oldActivePlayerId) return
+  const g = game.value
+  if (!g) return
+  if (!isInvestigatorTurn(g)) return
+  if (!(newActivePlayerId in g.settings.aiPlayers)) return
+
+  Api.fetchAiQuestions(g.id)
+    .then((qs) => {
+      ai.mergeQuestions(qs, g.scenarioSteps)
+      resolveAiTargetQuestions()
+    })
+    .catch((e) => console.error(e))
+})
+
+// A skill test opening is another moment an AI can offer help: committing a card
+// to the performer's test (offerCommit). Fetch when a test opens, regardless of
+// whose turn it is, so an AI can offer to boost a (human or AI) performer.
+watch(() => (game.value?.skillTest ?? null) !== null, (hasTest, hadTest) => {
+  if (!hasTest || hadTest) return
+  if (!aiDevEnabled.value || props.spectate) return
+  const g = game.value
+  if (!g) return
+  if (Object.keys(g.settings.aiPlayers).length === 0) return
+
+  Api.fetchAiQuestions(g.id)
+    .then((qs) => {
+      ai.mergeQuestions(qs, g.scenarioSteps)
+      resolveAiTargetQuestions()
+    })
+    .catch((e) => console.error(e))
+})
+
+// Auto-resolve any AI-target question that carries a precomputed answer: replay
+// its chosen option's RAW config Messages over the debug channel and drop it from
+// the store so it never renders. Human-target questions are left for the panel.
+function resolveAiTargetQuestions() {
+  const g = game.value
+  if (!g) return
+  for (const q of [...ai.questions]) {
+    if (!q.toIsAi || q.aiAnswer === null) continue
+    const option = q.options[q.aiAnswer]
+    if (option) {
+      for (const message of option.messages) debug.send(g.id, message)
+    }
+    ai.dismissQuestion(q.id)
+  }
+}
+
+type SkipTriggerEntry = { playerId: string; choiceIdx: number; investigatorId: string }
+
+function skipTriggerEntries(g: Arkham.Game): SkipTriggerEntry[] {
+  const result: SkipTriggerEntry[] = []
   for (const pid of Object.keys(g.question)) {
     const cs = ArkhamGame.choices(g, pid)
     const idx = cs.findIndex((c) => c.tag === Message.MessageType.SKIP_TRIGGERS_BUTTON)
-    if (idx !== -1) result.push({ playerId: pid, choiceIdx: idx })
+    const choice = idx === -1 ? null : cs[idx]
+    if (choice?.tag === Message.MessageType.SKIP_TRIGGERS_BUTTON) {
+      result.push({ playerId: pid, choiceIdx: idx, investigatorId: choice.investigatorId })
+    }
   }
   return result
 }
 
+function investigatorBelongsToPlayer(g: Arkham.Game, investigatorId: string, targetPlayerId: string) {
+  return g.investigators[investigatorId]?.playerId === targetPlayerId
+}
+
+function isInvestigatorTurn(g: Arkham.Game) {
+  return g.phaseStep?.tag === 'InvestigationPhaseStep'
+    && [
+      'NextInvestigatorsTurnBeginsStep',
+      'NextInvestigatorsTurnBeginsWindow',
+      'InvestigatorTakesActionStep',
+      'InvestigatorsTurnEndsStep',
+    ].includes(g.phaseStep.contents)
+}
+
+function canCurrentPlayerSkipAllWindows(g: Arkham.Game, currentPlayerId: string) {
+  if (solo.value) return true
+
+  if (g.skillTest) {
+    return investigatorBelongsToPlayer(g, g.skillTest.investigator, currentPlayerId)
+  }
+
+  if (isInvestigatorTurn(g)) {
+    return investigatorBelongsToPlayer(g, g.activeInvestigatorId, currentPlayerId)
+  }
+
+  return true
+}
+
+function authorizedSkipTriggerEntries(g: Arkham.Game): SkipTriggerEntry[] {
+  if (!playerId.value) return []
+  if (!canCurrentPlayerSkipAllWindows(g, playerId.value)) return []
+  return skipTriggerEntries(g)
+}
+
 const skipAllAvailable = computed(() => {
-  if (!solo.value || !game.value) return false
-  return skipTriggerEntries(game.value).length > 1
+  if (!game.value) return false
+  if (skipAllPending.value.size > 0) return true
+
+  const entries = authorizedSkipTriggerEntries(game.value)
+  const distinct = new Set(entries.map((entry) => entry.playerId))
+  if (distinct.size > 1) return true
+  // The authorized player (e.g. the skill-test owner) may be waiting on a
+  // single other player's fast trigger with no window of their own to skip;
+  // let them skip that lone window too. Solo keeps the stricter rule.
+  return !solo.value && distinct.size === 1 && !distinct.has(playerId.value ?? '')
 })
+
+const skipAllInProgress = computed(() => skipAllPending.value.size > 0)
 
 function setGameQuestion(question: Record<string, Question>) {
   if (!game.value) return
@@ -248,26 +631,28 @@ function setGameQuestion(question: Record<string, Question>) {
 
 const websocketUrl = computed(() => {
   const spectatePrefix = props.spectate ? '/spectate' : ''
-  return `${baseURL}/api/v1/arkham/games/${props.gameId}${spectatePrefix}?token=${userStore.token}`
-    .replace(/https/, 'wss')
-    .replace(/http/, 'ws')
+  return buildWebsocketUrl(`/api/v1/arkham/games/${props.gameId}${spectatePrefix}`, userStore.token)
 })
 
 watch(
-  () => props.gameId,
-  async (newV, oldV) => {
-    if (!newV) return
-    if (newV === oldV) return
+  // Also react to `spectate`: the same Game.vue instance is reused when an
+  // organizer toggles between the Spectate (organizer) and Game (play-my-seat)
+  // routes for one gameId, so we must re-fetch in the new mode to pick up the
+  // player's seat/question (or drop them when spectating again).
+  () => [props.gameId, props.spectate] as const,
+  async (newVals, oldVals) => {
+    const [newId] = newVals
+    if (!newId) return
+    if (oldVals && newId === oldVals[0] && newVals[1] === oldVals[1]) return
     await fetchGame(props.gameId, props.spectate).then(
-      async ({ game: newGame, playerId: newPlayerId, multiplayerMode }) => {
-        try {
-          await loadAllImages(newGame)
-        } catch (e) {
-          console.error(e)
-        }
+      async ({ game: newGame, playerId: newPlayerId, multiplayerMode, eventId }) => {
+        preloadImages(newGame)
         ;(window as Window & { g?: Arkham.Game }).g = newGame
         game.value = newGame
         solo.value = multiplayerMode === 'Solo'
+        // Engage the Epic event this game belongs to even when the URL lacks
+        // ?event (e.g. entered via the join / take-a-seat path).
+        gamePayloadEventId.value = eventId
         updateGameLog(newGame.log)
         playerId.value = newPlayerId
         ready.value = true
@@ -294,8 +679,6 @@ const gameCardOnlyDecoder = JsonDecoder.object<GameCardOnly>(
   },
   'GameCard',
 )
-
-const baseURL = `${window.location.protocol}//${window.location.hostname}${window.location.port ? `:${window.location.port}` : ''}`
 
 // Socket Handling
 const onError = () => {
@@ -340,23 +723,29 @@ function scheduleApplyUpdate(payload: string) {
   Arkham.gameDecoder
     .decodePromise(payload)
     .then((updatedGame) => {
-      game.value = updatedGame
+      const locked = uiLock.value
+      // Behind a revelation: refresh the board but keep the question hidden so the
+      // player can't act until they dismiss it. On unlock the queued GameUpdate is
+      // replayed (locked === false) and restores the real question + side effects.
+      game.value = locked ? { ...updatedGame, question: {} } : updatedGame
       updateGameLog(updatedGame.log)
       preloadImages(updatedGame)
-      if (solo.value === true) {
-        if (Object.keys(game.value.question).length == 1) {
-          playerId.value = Object.keys(game.value.question)[0]
-        } else if (game.value.activePlayerId !== playerId.value) {
-          if (playerId.value && Object.keys(game.value.question).includes(playerId.value)) {
-            playerId.value = game.value.activePlayerId
-          } else {
+      if (!locked) {
+        if (solo.value === true) {
+          if (Object.keys(game.value.question).length == 1) {
+            playerId.value = Object.keys(game.value.question)[0]
+          } else if (game.value.activePlayerId !== playerId.value) {
+            if (playerId.value && Object.keys(game.value.question).includes(playerId.value)) {
+              playerId.value = game.value.activePlayerId
+            } else {
+              playerId.value = Object.keys(game.value.question)[0]
+            }
+          } else if (playerId.value && !Object.keys(game.value.question).includes(playerId.value)) {
             playerId.value = Object.keys(game.value.question)[0]
           }
-        } else if (playerId.value && !Object.keys(game.value.question).includes(playerId.value)) {
-          playerId.value = Object.keys(game.value.question)[0]
         }
+        continueSkipAll()
       }
-      continueSkipAll()
     })
     .finally(() => {
       decoding = false
@@ -368,10 +757,19 @@ function scheduleApplyUpdate(payload: string) {
     })
 }
 
+function playAudioFile(fileName: string) {
+  if (soundsDisabled.value) return
+  // Only allow simple filenames from the server; audio files live under public/audio.
+  if (!/^[a-zA-Z0-9_.-]+\.(ogg|mp3|wav)$/i.test(fileName)) return
+
+  const audio = new Audio(`/audio/${fileName}`)
+  audio.play().catch((error) => console.warn(`Unable to play audio file: ${fileName}`, error))
+}
+
 function continueSkipAll() {
   if (skipAllPending.value.size === 0) return
   if (!game.value) return
-  const next = skipTriggerEntries(game.value).find((e) => skipAllPending.value.has(e.playerId))
+  const next = authorizedSkipTriggerEntries(game.value).find((e) => skipAllPending.value.has(e.playerId))
   if (!next) {
     skipAllPending.value = new Set()
     return
@@ -395,7 +793,12 @@ function sendSkipFor(targetPlayerId: string, choiceIdx: number) {
 
 function skipAllTriggers() {
   if (!game.value || props.spectate) return
-  const entries = skipTriggerEntries(game.value)
+  if (skipAllPending.value.size > 0) {
+    if (!processing.value) continueSkipAll()
+    return
+  }
+
+  const entries = authorizedSkipTriggerEntries(game.value)
   if (entries.length === 0) return
   skipAllPending.value = new Set(entries.map((e) => e.playerId))
   const first = entries[0]
@@ -407,6 +810,205 @@ const { send, close } = useWebSocket(websocketUrl, {
   onError,
   onConnected,
   onMessage,
+})
+
+// --- AI-investigator driver (dev-only) ---------------------------------------
+// For each parked question belonging to an enabled AI seat, schedule (after that
+// seat's response delay) an `AiAnswer` over this same websocket; the backend
+// computes and applies the AI's move. Manual override always works: the creator
+// clicking a normal choice for an AI seat (solo mode lets one tab answer any
+// seat) just resolves it via the existing `choose` path.
+
+// Setup/lobby questions the AI must never touch (it has no decision model for
+// these). Tags are read after unwrapping QuestionLabel/PayCostQuestion/QuestionWithSource.
+const AI_SETUP_DENYLIST = new Set<string>([
+  'ChooseDeck',
+  'ChooseUpgradeDeck',
+  'PickScenarioSettings',
+  'PickCampaignSettings',
+  'PickCampaignSpecific',
+  'PickScenarioSpecific',
+  'ContinueCampaign',
+  'PickDestiny',
+])
+
+// Pending scheduled sends, keyed by playerId; tracks the questionVersion the send
+// was armed for so a question change cancels/reschedules instead of firing stale.
+const aiScheduled = new Map<string, { version: number; timer: ReturnType<typeof setTimeout> }>()
+// The (playerId -> questionVersion) we last actually sent an AiAnswer for. Drives
+// the loop-guard: if the same (seat, version) is still pending after our send, the
+// AI couldn't resolve it, so we stop and hand it to the human.
+const aiSentVersion = new Map<string, number>()
+// Reactive set of AI seats currently "stuck" (handed back to the human creator).
+const aiStuckSeats = ref<Set<string>>(new Set())
+
+// All configured AI seats (used to mount the dev panel); the driver further
+// filters to enabled seats.
+const aiSeatIds = computed(() =>
+  game.value ? Object.keys(game.value.settings.aiPlayers) : [],
+)
+
+function innerQuestionTag(q: Question | undefined): string | null {
+  let cur: Question | undefined = q
+  while (
+    cur &&
+    (cur.tag === 'QuestionLabel' || cur.tag === 'PayCostQuestion' || cur.tag === 'QuestionWithSource')
+  ) {
+    cur = 'question' in cur ? cur.question : undefined
+  }
+  return cur ? cur.tag : null
+}
+
+function enabledAiSeats(g: Arkham.Game): string[] {
+  const seats = g.settings.aiPlayers
+  return Object.keys(seats).filter((pid) => seats[pid]?.aiEnabled)
+}
+
+// The investigator id seated at an AI playerId (AI seats map to an investigator
+// via investigator.playerId), or null if that seat isn't seated yet.
+function aiSeatInvestigatorId(g: Arkham.Game, pid: string): string | null {
+  for (const investigator of Object.values(g.investigators)) {
+    if (investigator.playerId === pid) return investigator.id
+  }
+  return null
+}
+
+// A skill-test ASSIST commit window for an AI seat: there is an active skill
+// test, the seat has a parked question, and the seat is NOT the performer (the
+// performer's own AI commit window is driven normally by the backend). The
+// backend's AiAnswer driver loops on these assist windows, so we leave them
+// parked and surface the dev "Request assist" button instead (AiControlPanel).
+function isAiAssistWindow(g: Arkham.Game, pid: string): boolean {
+  if (!g.skillTest) return false
+  if (!(pid in g.question)) return false
+  const invId = aiSeatInvestigatorId(g, pid)
+  return invId !== null && invId !== g.skillTest.investigator
+}
+
+function cancelAiTimer(pid: string) {
+  const sched = aiScheduled.get(pid)
+  if (sched) {
+    clearTimeout(sched.timer)
+    aiScheduled.delete(pid)
+  }
+}
+
+function cancelAllAiTimers() {
+  for (const { timer } of aiScheduled.values()) clearTimeout(timer)
+  aiScheduled.clear()
+}
+
+function setAiStuck(pid: string, stuck: boolean) {
+  if (stuck === aiStuckSeats.value.has(pid)) return
+  const next = new Set(aiStuckSeats.value)
+  if (stuck) next.add(pid)
+  else next.delete(pid)
+  aiStuckSeats.value = next
+}
+
+function driveAi() {
+  // Flag off (or spectating): stand down and clear any armed sends.
+  if (!aiDevEnabled.value || props.spectate) {
+    cancelAllAiTimers()
+    return
+  }
+  const g = game.value
+  if (!g) {
+    cancelAllAiTimers()
+    return
+  }
+
+  // Master kill-switch off, or not in active play (setup/lobby/over): stand down.
+  if (!ai.enabled || g.gameState.tag !== 'IsActive') {
+    cancelAllAiTimers()
+    return
+  }
+
+  const seats = enabledAiSeats(g)
+  if (seats.length === 0) {
+    cancelAllAiTimers()
+    return
+  }
+
+  const version = g.scenarioSteps
+
+  // Drop scheduled sends for seats no longer pending / no longer AI-enabled.
+  for (const pid of [...aiScheduled.keys()]) {
+    if (!(pid in g.question) || !seats.includes(pid)) cancelAiTimer(pid)
+  }
+  // Clear stale stuck flags once a seat's question clears or its version advances.
+  for (const pid of [...aiStuckSeats.value]) {
+    if (!(pid in g.question) || aiSentVersion.get(pid) !== version) setAiStuck(pid, false)
+  }
+
+  for (const pid of seats) {
+    const q = g.question[pid]
+    if (!q) continue
+
+    const tag = innerQuestionTag(q)
+    if (tag && AI_SETUP_DENYLIST.has(tag)) continue
+
+    // Skill-test ASSIST window: the backend AiAnswer driver loops on a teammate
+    // AI's commit window during another investigator's test. Never auto-answer
+    // it and never mark it "stuck" — leave it parked for the human / the dev
+    // "Request assist" button. Cancel any send already armed before the test.
+    if (isAiAssistWindow(g, pid)) {
+      cancelAiTimer(pid)
+      continue
+    }
+
+    // Loop-guard: we already auto-answered this exact (seat, version) and it is
+    // STILL pending -> the AI couldn't resolve this question shape. Mark the seat
+    // stuck and stop auto-answering it; the human creator answers it manually.
+    // Normal auto-answering resumes once the version advances.
+    if (aiSentVersion.get(pid) === version) {
+      setAiStuck(pid, true)
+      cancelAiTimer(pid)
+      continue
+    }
+    setAiStuck(pid, false)
+
+    const existing = aiScheduled.get(pid)
+    if (existing) {
+      if (existing.version === version) continue // already armed for this version
+      cancelAiTimer(pid) // version moved on -> reschedule against the current one
+    }
+
+    const delay = g.settings.aiPlayers[pid]?.aiResponseDelayMs ?? 1500
+    const timer = setTimeout(() => {
+      aiScheduled.delete(pid)
+      const cur = game.value
+      // Re-validate at fire time so a question change/clear, a state change, a
+      // disabled seat, or a paused master switch cancels the stale send.
+      if (!cur || !ai.enabled || props.spectate) return
+      if (cur.gameState.tag !== 'IsActive') return
+      if (cur.scenarioSteps !== version) return
+      if (!(pid in cur.question)) return
+      if (!enabledAiSeats(cur).includes(pid)) return
+      // A skill test that opened after this send was armed turns the seat's
+      // question into an assist window; don't fire AiAnswer into it (it loops).
+      if (isAiAssistWindow(cur, pid)) return
+      aiSentVersion.set(pid, version)
+      send(JSON.stringify({ tag: 'AiAnswer', playerId: pid }))
+    }, Math.max(0, delay))
+    aiScheduled.set(pid, { version, timer })
+  }
+}
+
+// Re-evaluate whenever the game updates (every server push reassigns game.value)
+// and whenever the client master switch flips.
+watch(game, () => {
+  // Drop "AI asks questions" entries that predate the current game state (undo,
+  // or advancing past the window they belonged to).
+  if (game.value) ai.clearStale(game.value.scenarioSteps)
+  driveAi()
+})
+watch(() => ai.enabled, () => driveAi())
+// Toggling the dev "AI Investigators" flag mid-session stands the driver down /
+// brings it back up immediately (the AiControlPanel mount is reactive on its own).
+watch(aiDevEnabled, (enabled) => {
+  if (!enabled) ai.clearQuestions()
+  driveAi()
 })
 const handleResult = (result: ServerResult) => {
   processing.value = false
@@ -427,7 +1029,23 @@ const handleResult = (result: ServerResult) => {
     case 'GameShowUnder':
       emitter.emit('showUnder', result.contents)
       return
+    case 'GameAudio':
+      playAudioFile(result.contents)
+      return
     case 'GameUI':
+      if (result.contents.startsWith('theSilence:')) {
+        if (props.spectate) return
+        const targetPlayer = result.contents.slice('theSilence:'.length)
+        if (!(solo.value === true || targetPlayer === playerId.value)) return
+        if (uiLock.value) {
+          qPush(result)
+          return
+        }
+        document.dispatchEvent(new CustomEvent('arkham:clear-card-overlay'))
+        showTheSilenceModal.value = true
+        uiLock.value = true
+        return
+      }
       switch (result.contents) {
         case 'confetti': {
           setTimeout(() => {
@@ -472,6 +1090,24 @@ const handleResult = (result: ServerResult) => {
         })
       return
 
+    case 'GameAchievement': {
+      // Non-blocking gold toast; vue-toastification stacks multiple unlocks.
+      // Strings are translated here because the toast container has no i18n.
+      const tag = result.contents
+      toast(
+        {
+          component: markRaw(AchievementToast),
+          props: {
+            title: t('achievements.toastTitle'),
+            name: t(`achievements.entries.${tag}.name`),
+            text: t(`achievements.entries.${tag}.text`),
+          },
+        },
+        { timeout: 8000, icon: false, closeButton: false, toastClassName: 'achievement-toast' },
+      )
+      return
+    }
+
     case 'GameCard':
       if (props.spectate) return
       if (uiLock.value) {
@@ -514,13 +1150,19 @@ const handleResult = (result: ServerResult) => {
           uiLock.value = false
         })
       return
+    case 'SharedStateUpdate':
+      // "Epic Multiplayer" shared-state feed riding on this group's game ws.
+      // Forward it to the event store so the organizer bar's shared counters stay
+      // live; harmless no-op for ordinary games that never receive this tag.
+      eventStore.applySharedState(result.contents)
+      return
     case 'GameUpdate':
-      if (uiLock.value) {
-        qPush(result)
-        if (game.value) setGameQuestion({})
-      } else {
-        scheduleApplyUpdate(result.contents)
-      }
+      // Flush the latest state onto the board even while a revelation/modal holds
+      // the UI lock, so the table behind it reflects the current situation instead
+      // of freezing on the pre-revelation state (issue #4817). Keep it queued so
+      // the pending question is only restored once every revelation is dismissed.
+      if (uiLock.value) qPush(result)
+      scheduleApplyUpdate(result.contents)
       return
   }
 }
@@ -536,7 +1178,7 @@ watch(uiLock, async () => {
   }
 })
 
-const undoScenarioDialog = useTemplateRef<HTMLDialogElement>('undoScenarioDialog')
+const confirmingUndoScenario = ref(false)
 
 const actionMap = computed<Map<string, () => void>>(() => {
   const map = new Map<string, () => void>()
@@ -685,7 +1327,7 @@ const handleKeyPress = (event: KeyboardEvent) => {
     }
     if (k === 's' && canUndoScenario.value) {
       clearUndoChord()
-      undoScenarioDialog.value?.showModal()
+      confirmingUndoScenario.value = true
       return
     }
     // Pressing U again while armed = single undo (re-pressing the prefix)
@@ -825,7 +1467,7 @@ const handleKeyPress = (event: KeyboardEvent) => {
 const toggleSidebar = function () {
   showSidebar.value = !showSidebar.value
   if (!isMobileViewport()) {
-    localStorage.setItem('showSidebar', JSON.stringify(showSidebar.value))
+    setGameLocalStorageItem(props.gameId, 'showSidebar', JSON.stringify(showSidebar.value))
   }
 }
 
@@ -852,7 +1494,7 @@ async function undo() {
 }
 
 async function undoScenario() {
-  undoScenarioDialog.value?.close()
+  confirmingUndoScenario.value = false
   processing.value = true
   if (game.value) setGameQuestion({})
   resultQueue.value = []
@@ -921,6 +1563,7 @@ async function fileBug() {
 
 const continueUI = () => {
   gameCard.value = null
+  showTheSilenceModal.value = false
   tarotCards.value = []
   uiLock.value = false
 }
@@ -935,23 +1578,27 @@ async function loadAllImages(game: Arkham.Game): Promise<void> {
   const pending: string[] = []
   for (const card of Object.values(game.cards)) {
     const { cardCode, isFlipped } = toCardContents(card)
-    const url = imgsrc(`cards/${cardCode.replace(/^c/, '')}${isFlipped ? 'b' : ''}.avif`)
-    if (!preloaded.has(url)) pending.push(url)
+    const url = cardImg(`${cardCode.replace(/^c/, '')}${isFlipped ? 'b' : ''}`)
+    if (!preloaded.has(url) && !preloading.has(url)) pending.push(url)
   }
   if (pending.length === 0) return
+  pending.forEach((url) => preloading.add(url))
 
   await Promise.all(
     pending.map(
       (url) =>
-        new Promise<void>((resolve, reject) => {
+        new Promise<void>((resolve) => {
           const img = new Image()
           img.onload = () => {
             preloaded.add(url)
+            preloading.delete(url)
             resolve()
           }
           img.onerror = () => {
             preloaded.add(url)
-            reject(`Could not load ${url}`)
+            preloading.delete(url)
+            console.warn(`Could not preload ${url}`)
+            resolve()
           }
           img.src = url
         }),
@@ -1008,6 +1655,15 @@ async function choosePaymentAmounts(amounts: Record<string, number>): Promise<vo
   }
 }
 
+async function scenarioSpecificAnswer(key: string, value: unknown): Promise<void> {
+  if (game.value && !props.spectate) {
+    oldQuestion.value = game.value.question
+    setGameQuestion({})
+    processing.value = true
+    send(JSON.stringify({ tag: 'ScenarioSpecificAnswer', contents: [key, value] }))
+  }
+}
+
 async function chooseAmounts(amounts: Record<string, number>): Promise<void> {
   if (game.value && !props.spectate) {
     oldQuestion.value = game.value.question
@@ -1039,10 +1695,11 @@ function switchInvestigator(newPlayerId: string) {
 }
 type ExportType = 'basic' | 'full' | 'scenario'
 function debugExport(exportType: ExportType) {
+  const isFullExport = exportType === 'full'
   api
     .get(
-      `arkham/games/${props.gameId}/${exportType == 'full' ? 'full-' : exportType == 'scenario' ? 'scenario-' : ''}export`,
-      { responseType: 'blob' },
+      `arkham/games/${props.gameId}/${isFullExport ? 'full-' : exportType == 'scenario' ? 'scenario-' : ''}export`,
+      { responseType: 'blob', params: isFullExport ? { gzip: true } : undefined },
     )
     .then((resp) => {
       const url = window.URL.createObjectURL(resp.data)
@@ -1050,7 +1707,7 @@ function debugExport(exportType: ExportType) {
       a.style.display = 'none'
       a.href = url
       // the filename you want
-      a.download = 'arkham-debug.json'
+      a.download = isFullExport ? 'arkham-debug.json.gz' : 'arkham-debug.json'
       document.body.appendChild(a)
       a.click()
       window.URL.revokeObjectURL(url)
@@ -1071,15 +1728,49 @@ provide('chooseDeckList', chooseDeckList)
 provide('send', send)
 provide('choosePaymentAmounts', choosePaymentAmounts)
 provide('chooseAmounts', chooseAmounts)
+provide('scenarioSpecificAnswer', scenarioSpecificAnswer)
 provide('switchInvestigator', switchInvestigator)
 provide('solo', solo)
 provide('skipAllTriggers', skipAllTriggers)
 provide('skipAllAvailable', skipAllAvailable)
+provide('skipAllInProgress', skipAllInProgress)
 provide('showOtherPlayersHands', showOtherPlayersHands)
+
+function updateFocusLight() {
+  const highlighted = [...document.querySelectorAll<HTMLElement>(
+    '.source-highlight, .ability-target, .card-frame-inner.highlighted, .cards-under-indicator--highlighted',
+  )].find((el) => {
+    if (el.closest('.scenario-cards')) return false
+    const rect = el.getBoundingClientRect()
+    return rect.width > 0 && rect.height > 0 && rect.bottom >= 0 && rect.right >= 0
+      && rect.top <= window.innerHeight && rect.left <= window.innerWidth
+  })
+
+  if (!highlighted) {
+    focusLightX.value = -1000
+    focusLightY.value = -1000
+    return
+  }
+
+  const rect = highlighted.getBoundingClientRect()
+  focusLightX.value = rect.left + rect.width / 2
+  focusLightY.value = rect.top + rect.height / 2
+}
+
+function scheduleFocusLightUpdate() {
+  if (focusLightAnimationFrame !== null) return
+  focusLightAnimationFrame = requestAnimationFrame(() => {
+    focusLightAnimationFrame = null
+    updateFocusLight()
+  })
+}
 
 const onMove = (event: MouseEvent) => {
   mouseX = event.clientX
   mouseY = event.clientY
+  flashlightX.value = event.clientX
+  flashlightY.value = event.clientY
+  scheduleFocusLightUpdate()
 }
 
 // callbacks
@@ -1094,22 +1785,30 @@ const onPlayabilityResult = (result: any) => {
 emitter.on('playabilityResult', onPlayabilityResult)
 
 onMounted(() => {
+  flashlightX.value = window.innerWidth / 2
+  flashlightY.value = window.innerHeight / 2
   ;(window as any).sendDebug = async (msg: any) => {
     if (game.value) await debug.send(game.value.id, msg)
   }
   ;(window as any).undo = undo
   ;(window as any).debugChoose = choose
   document.addEventListener('mousemove', onMove, { passive: true })
+  focusLightObserver = new MutationObserver(scheduleFocusLightUpdate)
+  focusLightObserver.observe(document.body, { attributes: true, attributeFilter: ['class'], subtree: true })
+  scheduleFocusLightUpdate()
   document.addEventListener('keydown', handleKeyPress)
-  for (var key in localStorage) {
-    if (key.startsWith('selected-tab:')) localStorage.removeItem(key)
-  }
+  window.addEventListener('arkham-setting-change', handleSettingChange)
 })
 
 onBeforeRouteLeave(() => close())
 onUnmounted(() => {
   document.removeEventListener('keydown', handleKeyPress)
   document.removeEventListener('mousemove', onMove)
+  focusLightObserver?.disconnect()
+  focusLightObserver = null
+  if (focusLightAnimationFrame !== null) cancelAnimationFrame(focusLightAnimationFrame)
+  window.removeEventListener('arkham-setting-change', handleSettingChange)
+  cancelAllAiTimers()
   delete (window as any).sendDebug
   delete (window as any).undo
   delete (window as any).debugChoose
@@ -1127,7 +1826,16 @@ onUnmounted(() => {
       </section>
     </div>
   </div>
-  <div id="game" v-else-if="ready && game && playerId">
+  <div id="game" v-else-if="ready && game && playerId" :style="{ '--epic-bar-height': epicBarHeight + 'px' }">
+    <AiControlPanel
+      v-if="aiDevEnabled && game && aiSeatIds.length > 0"
+      :game="game"
+      :stuck-seats="aiStuckSeats"
+    />
+    <AiQuestionsPanel
+      v-if="aiDevEnabled && game && aiSeatIds.length > 0"
+      :game="game"
+    />
     <dialog v-if="error" class="error-dialog">
       <h2>{{ $t('error') }}</h2>
       <p class="error-message">{{ error }}</p>
@@ -1149,6 +1857,18 @@ onUnmounted(() => {
       />
     </div>
     <CardOverlay />
+    <div
+      v-if="realityAcidLightActive"
+      class="reality-acid-flashlight"
+      :style="{ '--flashlight-x': `${flashlightX}px`, '--flashlight-y': `${flashlightY}px` }"
+      aria-hidden="true"
+    ></div>
+    <div
+      v-if="realityAcidLightActive"
+      class="reality-acid-focus-light"
+      :style="{ '--focus-light-x': `${focusLightX}px`, '--focus-light-y': `${focusLightY}px` }"
+      aria-hidden="true"
+    ></div>
     <Draggable v-if="showShortcuts">
       <div class="shortcuts-modal">
         <div class="shortcuts-header">
@@ -1278,7 +1998,7 @@ onUnmounted(() => {
     <div class="game-bar">
       <div class="game-bar-item">
         <div>
-          <button @click="router.push({ name: 'CampaignLog', params: { gameId } })">
+          <button @click="showLog = !showLog">
             <DocumentTextIcon aria-hidden="true" />
             {{ showLog ? $t('gameBar.closeLog') : $t('gameBar.viewLog') }}
           </button>
@@ -1388,7 +2108,7 @@ onUnmounted(() => {
                 <button
                   class="undo-jump scope-scenario"
                   :class="{ active }"
-                  @click="undoScenarioDialog && undoScenarioDialog.showModal()"
+                  @click="confirmingUndoScenario = true"
                 >
                   <FlagIcon aria-hidden="true" />
                   <span class="undo-jump-label">{{ $t('gameBar.restartScenario') }}</span>
@@ -1413,11 +2133,29 @@ onUnmounted(() => {
         </template>
       </div>
       <div class="right">
-        <button @click="toggleSidebar">
+        <button v-if="isActualScenarioView" @click="toggleSidebar">
           <ArrowsRightLeftIcon aria-hidden="true" /> {{ $t('gameBar.toggleSidebar') }}
         </button>
       </div>
     </div>
+    <div v-if="hasEventBar" ref="epicBarRef" class="epic-bar-slot">
+      <OrganizerBar
+        v-if="organizerEventId"
+        :event-id="organizerEventId"
+        :current-game-id="gameId"
+        :spectate="spectate"
+        :current-act-stage="currentActStage"
+      />
+      <PlayerEventBar
+        v-else-if="playerEventId"
+        :event-id="playerEventId"
+        :current-game-id="gameId"
+        :spectate="spectate"
+        :current-act-stage="currentActStage"
+      />
+    </div>
+    <EventStartBarrier v-if="showStartBarrier" />
+    <EventActAdvanceBarrier v-if="showActAdvanceWait" :organizer-event-id="organizerEventId" />
     <MultiplayerLobby
       v-if="game.gameState.tag === 'IsPending'"
       :game-id="gameId"
@@ -1439,9 +2177,28 @@ onUnmounted(() => {
         :game="game"
         :cards="cards"
         :playerId="playerId"
-      />
+      >
+        <template #header-leading>
+          <button class="back-button" @click="showLog = false">
+            <font-awesome-icon icon="arrow-left" class="back-icon" />
+            <span>{{ $t('back') }}</span>
+          </button>
+        </template>
+      </CampaignLog>
       <div v-else class="game-main">
-        <div v-if="gameCard" class="revelation">
+        <div v-if="showTheSilenceModal" class="the-silence-modal-backdrop">
+          <div class="the-silence-modal" role="dialog" aria-modal="true" aria-labelledby="the-silence-modal-title">
+            <img class="the-silence-modal__agenda no-overlay" :src="imgsrc('cards/10652.avif')" alt="The Silence" />
+            <div class="the-silence-modal__body">
+              <h2 id="the-silence-modal-title">The Silence</h2>
+              <p>If you look at the Cosmic Emissary enemy for more than 15 seconds at a time, you are <strong>driven insane</strong>.</p>
+              <div class="the-silence-modal__actions">
+                <button type="button" class="the-silence-modal__confirm" @click="continueUI">{{ $t('ok') }}</button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div v-else-if="gameCard" class="revelation">
           <div class="revelation-container">
             <h2>{{ format(gameCard.title) }}</h2>
             <div class="revelation-card-container">
@@ -1474,7 +2231,7 @@ onUnmounted(() => {
             <div class="debug-playability-content">
               <img
                 class="debug-card-image"
-                :src="imgsrc(`cards/${playabilityInfo.cardCode.replace('c', '')}.avif`)"
+                :src="cardImg(playabilityInfo.cardCode.replace('c', ''))"
               />
               <ul class="playability-checks">
                 <li
@@ -1522,8 +2279,11 @@ onUnmounted(() => {
           :gameLog="gameLog"
           :playerId="playerId"
           :campaign="game.campaign"
+          :realityAcidLightDevoured="realityAcidLightDevoured"
+          :realityAcidLightActive="realityAcidLightActive"
           @choose="choose"
           @update="update"
+          @toggleRealityAcidLight="toggleRealityAcidLight"
         />
         <ScenarioSettings
           v-else-if="
@@ -1537,15 +2297,18 @@ onUnmounted(() => {
           v-else-if="game.scenario && !gameOver"
           :game="game"
           :playerId="playerId"
+          :realityAcidLightDevoured="realityAcidLightDevoured"
+          :realityAcidLightActive="realityAcidLightActive"
           @choose="choose"
           @update="update"
+          @toggleRealityAcidLight="toggleRealityAcidLight"
         />
         <div
           class="sidebar"
+          :class="{ 'sidebar--empty-log': gameLog.length === 0 }"
           v-if="
             showSidebar &&
-            game.scenario !== null &&
-            (game.gameState.tag === 'IsActive' || game.gameState.tag === 'IsOver')
+            isActualScenarioView
           "
         >
           <GameLog :game="game" :gameLog="gameLog" @undo="undo" />
@@ -1560,28 +2323,89 @@ onUnmounted(() => {
           </button>
           <CampaignLog v-if="game !== null" :game="game" :cards="cards" :playerId="playerId" />
         </div>
-        <div class="sidebar" v-if="showSidebar && game.scenario === null">
-          <GameLog :game="game" :gameLog="gameLog" @undo="undo" />
-        </div>
         <div
-          v-if="showSidebar"
+          v-if="showSidebar && isActualScenarioView"
           class="sidebar-backdrop"
           @click="toggleSidebar"
           aria-hidden="true"
         ></div>
       </div>
     </template>
-    <dialog id="undoScenarioDialog" ref="undoScenarioDialog">
-      <p>{{ $t('game.areYouSureUndoScenario') }}</p>
-      <div class="buttons">
-        <button @click="undoScenario()">{{ $t('Yes') }}</button>
-        <button @click="undoScenarioDialog?.close()">{{ $t('No') }}</button>
-      </div>
-    </dialog>
+    <Prompt
+      v-if="confirmingUndoScenario"
+      prompt="$game.areYouSureUndoScenario"
+      :yes="undoScenario"
+      :no="() => confirmingUndoScenario = false"
+    />
   </div>
 </template>
 
 <style lang="scss" scoped>
+.back-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.7);
+  font-family: teutonic, sans-serif;
+  font-size: 0.95em;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+
+  .back-icon {
+    font-size: 0.85em;
+    transition: transform 0.15s;
+  }
+
+  &:hover {
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(255, 255, 255, 0.2);
+    color: #f0f0f0;
+
+    .back-icon {
+      transform: translateX(-3px);
+    }
+  }
+}
+
+.reality-acid-flashlight {
+  --flashlight-x: 50vw;
+  --flashlight-y: 50vh;
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-index-9998);
+  pointer-events: none;
+  background: radial-gradient(
+    circle 330px at var(--flashlight-x) var(--flashlight-y),
+    rgba(0, 0, 0, 0) 0 52%,
+    rgba(0, 0, 0, 0.12) 68%,
+    rgba(0, 0, 0, 0.82) 100%
+  );
+}
+
+.reality-acid-focus-light {
+  --focus-light-x: -1000px;
+  --focus-light-y: -1000px;
+  position: fixed;
+  inset: 0;
+  z-index: calc(var(--z-index-9998) + 1);
+  pointer-events: none;
+  background: radial-gradient(
+    circle 205px at var(--focus-light-x) var(--focus-light-y),
+    rgba(255, 248, 190, 0.72) 0 18%,
+    rgba(255, 230, 128, 0.42) 46%,
+    rgba(255, 226, 120, 0) 76%
+  );
+  mix-blend-mode: screen;
+  opacity: 0.95;
+}
+
 .action {
   border: 5px solid var(--select);
   border-radius: 15px;
@@ -1734,9 +2558,16 @@ onUnmounted(() => {
   }
 }
 
+/* Epic Multiplayer bar lives in normal flow above the board; reserve its measured
+   height so the board's player area stays within the viewport. Defaults to 0 for
+   ordinary games. */
+.epic-bar-slot {
+  flex: 0 0 auto;
+}
+
 .game-main {
   width: 100vw;
-  height: calc(100vh - 80px);
+  height: calc(100vh - 80px - var(--epic-bar-height, 0px));
   display: flex;
   flex: 1;
 }
@@ -1750,7 +2581,7 @@ onUnmounted(() => {
   width: 100%;
   height: 100%;
   display: flex;
-  z-index: 100;
+  z-index: var(--z-index-100);
 
   justify-content: center;
   align-items: center;
@@ -1780,7 +2611,7 @@ onUnmounted(() => {
     height: 100dvh;
     width: min(85vw, 360px);
     max-width: none;
-    z-index: 200;
+    z-index: var(--z-index-200);
     box-shadow: -2px 0 16px rgba(0, 0, 0, 0.45);
     animation: sidebar-slide-in 0.18s ease-out;
   }
@@ -1788,6 +2619,10 @@ onUnmounted(() => {
   @media (prefers-color-scheme: dark) {
     background: #1c1c1c;
   }
+}
+
+.sidebar--empty-log {
+  pointer-events: none;
 }
 
 .sidebar-backdrop {
@@ -1798,7 +2633,7 @@ onUnmounted(() => {
     position: fixed;
     inset: 0;
     background: rgba(0, 0, 0, 0.5);
-    z-index: 199;
+    z-index: var(--z-index-199);
     animation: sidebar-fade-in 0.18s ease-out;
   }
 }
@@ -1875,7 +2710,7 @@ header {
       content: '';
       display: none;
       position: absolute;
-      z-index: 9998;
+      z-index: var(--z-index-9998);
       top: 35px;
       left: 15px;
       width: 0;
@@ -1890,7 +2725,7 @@ header {
       content: 'Copied!';
       display: none;
       position: absolute;
-      z-index: 9999;
+      z-index: var(--z-index-9999);
       top: var(--nav-height);
       left: -37px;
       width: 114px;
@@ -2046,10 +2881,91 @@ header {
   }
 }
 
+.the-silence-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-index-30000);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.65);
+}
+
+.the-silence-modal {
+  display: flex;
+  gap: 18px;
+  max-width: min(760px, 100%);
+  padding: 18px;
+  border: 1px solid rgba(79, 224, 214, 0.65);
+  border-radius: 14px;
+  background: linear-gradient(135deg, rgba(5, 29, 35, 0.98), rgba(12, 75, 82, 0.98));
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.7), 0 0 28px rgba(79, 224, 214, 0.38);
+  color: #d8fffb;
+}
+
+.the-silence-modal__agenda {
+  width: min(280px, 34vw);
+  border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.55);
+}
+
+.the-silence-modal__body {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  max-width: 360px;
+  font-family: Arial, sans-serif;
+  text-align: left;
+}
+
+.the-silence-modal__body h2 {
+  margin: 0 0 10px;
+  font-family: Teutonic, Georgia, serif;
+  font-size: 1.7rem;
+  color: #bffff8;
+}
+
+.the-silence-modal__body p {
+  margin: 0;
+  line-height: 1.45;
+}
+
+.the-silence-modal__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.the-silence-modal__actions button {
+  padding: 8px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 8px;
+  color: white;
+  cursor: pointer;
+}
+
+.the-silence-modal__confirm {
+  background: rgba(12, 112, 119, 0.95);
+  box-shadow: 0 0 12px rgba(79, 224, 214, 0.28);
+}
+
+@media (max-width: 650px) {
+  .the-silence-modal {
+    flex-direction: column;
+    align-items: center;
+  }
+
+  .the-silence-modal__agenda {
+    width: min(280px, 72vw);
+  }
+}
+
 .revelation {
   position: absolute;
   transform: all 0.5s;
-  z-index: 1000;
+  z-index: var(--z-index-1000);
   color: white;
   text-align: center;
   margin: auto;
@@ -2069,7 +2985,7 @@ header {
     border: 0;
     padding: 10px;
     text-transform: uppercase;
-    background-color: #532e61;
+    background-color: var(--button-2);
     font-weight: bold;
     color: #eee;
     font: Arial, sans-serif;
@@ -2161,6 +3077,18 @@ header {
   width: fit-content;
   height: fit-content;
   gap: 10px;
+
+  .the-silence-card {
+    width: 300px;
+    aspect-ratio: var(--card-aspect);
+
+    .the-silence-card-image {
+      animation: none !important;
+      width: 300px !important;
+      aspect-ratio: var(--card-ratio);
+      border-radius: 15px;
+    }
+  }
 
   .tarot-cards {
     gap: 15px;
@@ -2497,7 +3425,7 @@ button:hover .shortcut {
   padding-block: 10px;
   width: 50%;
   display: flex;
-  z-index: 100;
+  z-index: var(--z-index-100);
   display: flex;
   flex-direction: column;
   border: 0;
@@ -2544,7 +3472,7 @@ button:hover .shortcut {
   }
 }
 .loader {
-  z-index: 1000;
+  z-index: var(--z-index-1000);
   position: absolute;
   top: 50px;
   left: 20px;
@@ -2573,7 +3501,7 @@ button:hover .shortcut {
 }
 
 .processing {
-  z-index: 1000;
+  z-index: var(--z-index-1000);
   position: absolute;
   top: 5px;
   left: 00px;
@@ -2642,12 +3570,12 @@ dialog {
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 1000;
+  z-index: var(--z-index-1000);
 }
 
 .debug-playability-modal {
   background: #1a1a2e;
-  border: 1px solid #444;
+  border: 1px solid var(--button-highlight);
   border-radius: 8px;
   padding: 1.5rem;
   min-width: 300px;

@@ -1,11 +1,12 @@
 <script lang="ts" setup>
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, ref } from 'vue'
 import { Dropdown } from 'floating-vue'
 import { type Card as ArkhamCard, type CardContents, cardImage, toCardContents } from '@/arkham/types/Card'
 import { imgsrc } from '@/arkham/helpers'
 import type { Game } from '@/arkham/types/Game'
 import * as ArkhamGame from '@/arkham/types/Game'
 import CardView from '@/arkham/components/Card.vue'
+import { useDebug } from '@/arkham/debug'
 
 const props = withDefaults(defineProps<{
   cards: (ArkhamCard | CardContents)[]
@@ -28,7 +29,9 @@ const emit = defineEmits<{
   'update:shown': [value: boolean]
 }>()
 
+const debug = useDebug()
 const internalShown = ref(false)
+const restoreAfterDrag = ref(false)
 const shown = computed({
   get: () => props.shown ?? internalShown.value,
   set: (value: boolean) => {
@@ -44,8 +47,40 @@ const interactive = computed(() => props.game !== undefined && props.playerId !=
 
 function isCardInChoices(card: ArkhamCard | CardContents): boolean {
   const cardId = toCardContents(card).id
-  return choices.value.some(choice => choice.tag === 'TargetLabel' && cardId === choice.target.contents)
+  return choices.value.some(choice => {
+    if (choice.tag === 'TargetLabel') return choice.target.tag === 'CardIdTarget' && cardId === choice.target.contents
+    if (choice.tag === 'AbilityLabel') {
+      const sourceId = choice.ability.source.sourceTag === 'OtherSource' ? choice.ability.source.contents : undefined
+      if (!sourceId) return false
+      if (cardId === sourceId) return true
+      const asset = props.game?.assets[sourceId]
+      return asset?.cardId === cardId
+    }
+    return false
+  })
 }
+
+const hasCardChoice = computed(() => props.cards.some(isCardInChoices))
+const isHighlighted = computed(() => props.highlighted || hasCardChoice.value)
+
+function finishDrag() {
+  window.removeEventListener('dragend', finishDrag)
+  window.removeEventListener('drop', finishDrag)
+  if (restoreAfterDrag.value) {
+    restoreAfterDrag.value = false
+    shown.value = true
+  }
+}
+
+function hideDiscardPopoverWhileDragging() {
+  if (!debug.active || !props.isDiscards || !shown.value) return
+  restoreAfterDrag.value = true
+  shown.value = false
+  window.addEventListener('dragend', finishDrag, { once: true })
+  window.addEventListener('drop', finishDrag, { once: true })
+}
+
+onBeforeUnmount(() => finishDrag())
 </script>
 
 <template>
@@ -61,7 +96,7 @@ function isCardInChoices(card: ArkhamCard | CardContents): boolean {
     <button
       type="button"
       class="cards-under-indicator"
-      :class="{ 'cards-under-indicator--highlighted': highlighted, 'cards-under-indicator--with-label': showLabel, 'cards-under-indicator--full-width': fullWidth }"
+      :class="{ 'cards-under-indicator--highlighted': isHighlighted, 'cards-under-indicator--with-label': showLabel, 'cards-under-indicator--full-width': fullWidth }"
       :aria-label="tooltip"
       v-tooltip="tooltip"
     >
@@ -76,7 +111,7 @@ function isCardInChoices(card: ArkhamCard | CardContents): boolean {
     <template #popper>
       <div class="cards-under-popover">
         <div class="cards-under-popover__header">{{ label }} ({{ count }})</div>
-        <div class="cards-under-popover__cards">
+        <div class="cards-under-popover__cards" @dragstart="hideDiscardPopoverWhileDragging">
           <div
             v-for="(card, i) in cards"
             :key="i"
@@ -128,8 +163,15 @@ function isCardInChoices(card: ArkhamCard | CardContents): boolean {
 }
 
 .cards-under-indicator--highlighted {
-  border-color: var(--select);
-  box-shadow: 0 0 0 1px var(--select), 0 0 10px color-mix(in srgb, var(--select) 65%, transparent);
+  border-color: color-mix(in srgb, var(--select) 65%, black);
+  background: color-mix(in srgb, var(--select) 55%, black);
+  color: #fff;
+  box-shadow: 0 0 8px color-mix(in srgb, var(--select) 45%, transparent);
+}
+
+.cards-under-indicator--highlighted:hover {
+  background: color-mix(in srgb, var(--select) 65%, black);
+  border-color: color-mix(in srgb, var(--select) 75%, black);
 }
 
 .cards-under-indicator--with-label {
@@ -213,7 +255,7 @@ function isCardInChoices(card: ArkhamCard | CardContents): boolean {
 
 .cards-under-popover {
   min-width: 0;
-  max-width: 80vw;
+  max-width: max(50vw, 300px);
   padding: 10px;
 }
 
@@ -229,9 +271,11 @@ function isCardInChoices(card: ArkhamCard | CardContents): boolean {
 .cards-under-popover__cards {
   display: flex;
   flex-direction: row;
-  align-items: flex-end;
+  flex-wrap: wrap;
+  align-items: flex-start;
   gap: 6px;
-  overflow-x: auto;
+  max-height: 50vh;
+  overflow: auto;
 }
 
 .cards-under-popover__card-wrap {
@@ -256,6 +300,10 @@ function isCardInChoices(card: ArkhamCard | CardContents): boolean {
 </style>
 
 <style>
+.v-popper__popper.v-popper--theme-cards-under-popover {
+  z-index: calc(var(--z-card-hover-overlay) - 1);
+}
+
 .v-popper--theme-cards-under-popover .v-popper__inner {
   background: rgba(15, 15, 20, 0.92);
   backdrop-filter: blur(8px);

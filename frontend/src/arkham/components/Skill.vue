@@ -4,7 +4,7 @@ import { Game } from '@/arkham/types/Game';
 import Token from '@/arkham/components/Token.vue';
 import * as ArkhamGame from '@/arkham/types/Game';
 import { AbilityLabel, AbilityMessage, Message, MessageType } from '@/arkham/types/Message';
-import { imgsrc } from '@/arkham/helpers';
+import { cardImg } from '@/arkham/helpers';
 import AbilityButton from '@/arkham/components/AbilityButton.vue'
 import * as Arkham from '@/arkham/types/Skill';
 
@@ -26,7 +26,7 @@ const id = computed(() => props.skill.id)
 const cardCode = computed(() => props.skill.cardCode)
 const image = computed(() => {
   const mutated = props.skill.mutated ? `_${props.skill.mutated}` : ''
-  return imgsrc(`cards/${cardCode.value.replace('c', '')}${mutated}.avif`)
+  return cardImg(`${cardCode.value.replace('c', '')}${mutated}`)
 })
 const choices = computed(() => ArkhamGame.choices(props.game, props.playerId))
 
@@ -123,7 +123,7 @@ const choose = (index: number) => emits('choose', index)
   border: 0;
   color: #fff;
   border-radius: 4px;
-  border: 1px solid #ff00ff;
+  border: 1px solid var(--select);
 }
 
 :deep(.token) {
@@ -137,13 +137,13 @@ const choose = (index: number) => emits('choose', index)
   display: flex;
   align-self: flex-start;
   align-items: flex-end;
-  z-index: 1;
+  z-index: var(--z-index-1);
   pointer-events: none;
   & :deep(.token-container) {
     width: unset;
   }
   & :deep(img) {
-    width: 20px;
+    width: var(--card-token-width);
     height: auto;
   }
 }

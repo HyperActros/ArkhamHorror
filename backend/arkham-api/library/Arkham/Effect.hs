@@ -22,6 +22,7 @@ import Arkham.Target
 import Arkham.Tracing
 
 import Arkham.Act.Acts (
+  curseOfEndlessSleepEffect,
   infiltratingTheLodgeEffect,
   theStrangerACityAflameEffect,
   theStrangerAlaranMistsEffect,
@@ -85,6 +86,7 @@ import Arkham.Asset.Assets (
   sixthSenseEffect,
   steadyHanded1Effect,
   thirtyFiveWinchesterEffect,
+  valeLanternAFaintHopeEffect,
   valeLanternBeaconOfHopeEffect,
   wellConnected3Effect,
   winchesterModel522Effect,
@@ -92,6 +94,7 @@ import Arkham.Asset.Assets (
   witherEffect,
   yaotl1Effect,
  )
+import Arkham.Campaigns.TheDrownedCity.Effects.StruggleForAir (struggleForAirEffect)
 import Arkham.Campaigns.TheInnsmouthConspiracy.Effects.NoAir (noAirEffect)
 import Arkham.Campaigns.TheScarletKeys.Key.Cards.TheWellspringOfFortune (
   theWellspringOfFortuneEffect,
@@ -196,6 +199,7 @@ import Arkham.Treachery.Treacheries (
   mysteriesOfTheLodgeEffect,
   pushedIntoTheBeyondEffect,
   realityAcid5U21Effect,
+  realityAcidEffect,
   restlessJourneyFallacyEffect,
   restlessJourneyHardshipEffect,
   restlessJourneyLiesEffect,
@@ -404,6 +408,7 @@ effectIsForNextGame :: Effect -> Bool
 effectIsForNextGame e = case e.window of
   Just EffectSetupWindow -> True
   Just (EffectScenarioSetupWindow {}) -> True
+  Just (EffectNextSetupWindow {}) -> True
   _ -> False
 
 effectIsForResolution :: Effect -> Bool
@@ -563,6 +568,7 @@ allEffects =
     , ("10129", SomeEffect bideYourTimeEffect)
     , ("10131", SomeEffect dawnStar1Effect)
     , ("10610a", SomeEffect valeLanternBeaconOfHopeEffect)
+    , ("10611a", SomeEffect valeLanternAFaintHopeEffect)
     , ("11018", SomeEffect grimResolveEffect)
     , ("11079", SomeEffect deliverance3Effect)
     , ("11124", SomeEffect dimensionalVortex5Effect)
@@ -609,8 +615,10 @@ allEffects =
     , ("81007", SomeEffect cursedShoresEffect)
     , ("82026", SomeEffect gildedVoltoEffect)
     , ("82035", SomeEffect mesmerizeEffect)
+    , ("83005", SomeEffect curseOfEndlessSleepEffect)
     , ("84014", SomeEffect restaurantEffect)
     , ("84042", SomeEffect chillingPresenceEffect)
+    , ("85044", SomeEffect realityAcidEffect)
     , ("88043", SomeEffect deckOfPossibilitiesTychokineticImplementEffect)
     , ("88044", SomeEffect isamaraOrdonezTheTorchSingerEffect)
     , ("88045", SomeEffect theWellspringOfFortuneEffect)
@@ -629,5 +637,6 @@ allEffects =
     , ("maxef", SomeEffect maxEffect)
     , ("abief", SomeEffect abilityEffect)
     , ("noair", SomeEffect noAirEffect)
+    , ("struggleForAir", SomeEffect struggleForAirEffect)
     , ("genef", SomeEffect genericEffect)
     ]

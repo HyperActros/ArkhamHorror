@@ -7,6 +7,7 @@ import Arkham.Calculation
 import Arkham.Campaigns.TheFeastOfHemlockVale.CampaignSteps qualified as Steps
 import Arkham.Campaigns.TheFeastOfHemlockVale.Helpers
 import Arkham.Campaigns.TheFeastOfHemlockVale.Key
+import Arkham.Campaigns.TheFeastOfHemlockVale.TokenHelpers
 import Arkham.Card.CardDef (CardDef, toCardDef)
 import Arkham.ChaosToken
 import Arkham.EncounterSet qualified as Set
@@ -62,14 +63,11 @@ preludeTheFinalEvening difficulty =
     ]
     $ (hasEncounterDeckL .~ False)
     . (referenceL .~ "10704")
+    . (isPreludeL .~ True)
 
 instance HasChaosTokenValue PreludeTheFinalEvening where
-  getChaosTokenValue iid tokenFace (PreludeTheFinalEvening attrs) = case tokenFace of
-    Skull -> pure $ toChaosTokenValue attrs Skull 3 5
-    Cultist -> pure $ ChaosTokenValue Cultist NoModifier
-    Tablet -> pure $ ChaosTokenValue Tablet NoModifier
-    ElderThing -> pure $ ChaosTokenValue ElderThing NoModifier
-    otherFace -> getChaosTokenValue iid otherFace attrs
+  getChaosTokenValue iid tokenFace (PreludeTheFinalEvening attrs) =
+    hemlockPreludeChaosTokenValue iid tokenFace attrs
 
 {- | The enemy-side card def for each resident. Residents are double-sided in
 the physical game; in the engine the asset side and enemy side are separate
@@ -112,6 +110,9 @@ instance RunMessage PreludeTheFinalEvening where
               labeled' "doneNothingWrongLie" intro4
             labeled' "sentencedToDeath" intro5
         else intro5
+      pure s
+    ResolveChaosToken token face iid | face `elem` [Cultist, ElderThing] -> do
+      hemlockPreludeResolveChaosToken attrs token face iid
       pure s
     Setup -> runScenarioSetup PreludeTheFinalEvening attrs do
       setup $ ul do
@@ -250,18 +251,28 @@ instance RunMessage PreludeTheFinalEvening where
       let
         awardXp :: ReverseQueue m => Text -> Int -> m ()
         awardXp xpKey xpAmount =
-          eachInvestigator \i -> gainXp i attrs (ikey ("xp." <> xpKey)) xpAmount
+          popScope $ eachInvestigator \i -> gainXp i attrs (ikey ("xp." <> xpKey)) xpAmount
       let recruitResident resident xpKey relIncrease xpAmount = do
             increaseRelationshipLevel resident relIncrease
             awardXp xpKey xpAmount
             takeControlOfResident resident
       case n of
         1 -> scope "motherRachel" do
+          codexFinished 1
           believed <- getHasRecord TheInvestigatorsBelieved
           lied <- getHasRecord TheInvestigatorsLiedToMotherRachel
+          let otherwise' = not believed && not lied
+          flavor do
+            setTitle "title"
+            compose.green do
+              h3 "header"
+              p.validate believed "believed"
+              hr
+              p.validate lied "lied"
+              hr
+              p.validate otherwise' "otherwise"
           if
             | believed -> do
-                flavor $ setTitle "title" >> p.green "believed"
                 traverse_
                   flipResidentToEnemy
                   [LeahAtwood, SimeonAtwood, GideonMizrah, JudithPark, TheoPeters]
@@ -275,13 +286,10 @@ instance RunMessage PreludeTheFinalEvening where
                 getSetAsideCardMaybe Agendas.lambsToTheSlaughter >>= traverse_ \lambs ->
                   setCurrentAgendaDeck [lambs]
             | lied -> do
-                flavor $ setTitle "title" >> p.green "lied"
-                flipResidentToEnemy MotherRachel >>= traverse_ \eid ->
-                  nonAttackEnemyDamage (Just iid) source 2 eid
-            | otherwise -> do
-                flavor $ setTitle "title" >> p.green "otherwise"
-                void $ flipResidentToEnemy MotherRachel
+                flipResidentToEnemy MotherRachel >>= traverse_ (nonAttackEnemyDamage_ (Just iid) source 2)
+            | otherwise -> void $ flipResidentToEnemy MotherRachel
         2 -> scope "leahAtwood" do
+          codexFinished 2
           sawMine <- getHasRecord LeahSawSomethingInTheMine
           if sawMine
             then storyWithChooseOneM' (setTitle "title" >> p.green "leah1") do
@@ -296,6 +304,7 @@ instance RunMessage PreludeTheFinalEvening where
               increaseRelationshipLevel LeahAtwood 1
               awardXp "leahAtwood" 1
         3 -> scope "simeonAtwood" do
+          codexFinished 3
           fireworks <- getHasRecord TheValeIsFullOfFireworks
           if fireworks
             then do
@@ -306,6 +315,7 @@ instance RunMessage PreludeTheFinalEvening where
               increaseRelationshipLevel SimeonAtwood 1
               awardXp "simeonAtwood" 1
         4 -> scope "williamHemlock" do
+          codexFinished 4
           flavor $ setTitle "title" >> p.green "body"
           recruitResident WilliamHemlock "williamHemlock" 1 2
           setRelationshipLevel RiverHawthorne 0
@@ -313,6 +323,7 @@ instance RunMessage PreludeTheFinalEvening where
           getSetAsideCardMaybe (toCardDef RiverHawthorne) >>= traverse_ obtainCard
           createEnemyAt_ Enemies.riverHawthorne theAtwoodHouse
         5 -> scope "riverHawthorne" do
+          codexFinished 5
           flavor $ setTitle "title" >> p.green "body"
           recruitResident RiverHawthorne "riverHawthorne" 1 2
           setRelationshipLevel WilliamHemlock 0
@@ -320,6 +331,7 @@ instance RunMessage PreludeTheFinalEvening where
           getSetAsideCardMaybe (toCardDef WilliamHemlock) >>= traverse_ obtainCard
           createEnemyAt_ Enemies.williamHemlock theAtwoodHouse
         6 -> scope "gideonMizrah" do
+          codexFinished 6
           toldTale <- getHasRecord GideonToldTheTaleOfTheAnnabelleLee
           foundTreasure <- getHasRecord GideonFoundHisTreasure
           if toldTale && foundTreasure
@@ -332,6 +344,7 @@ instance RunMessage PreludeTheFinalEvening where
               increaseRelationshipLevel GideonMizrah 1
               awardXp "gideonMizrah" 1
         7 -> scope "judithPark" do
+          codexFinished 7
           backedUp <- getHasRecord YouBackedJudithUp
           if backedUp
             then do
@@ -359,9 +372,11 @@ instance RunMessage PreludeTheFinalEvening where
                 flavor $ setTitle "title" >> p.green "otherwise"
                 takeControlOfResident TheoPeters
         9 -> scope "boardingHouse" do
+          codexFinished 9
           flavor $ setTitle "title" >> p.green "body"
           drawOrResource 3
         10 -> scope "theCrossroads" do
+          codexFinished 10
           flavor $ setTitle "title" >> p.green "body"
           theCrossroads <- getJustLocationByName "The Crossroads"
           enemies <- select AnyEnemy
@@ -370,9 +385,11 @@ instance RunMessage PreludeTheFinalEvening where
             enemyMoveTo attrs enemy theCrossroads
             exhaustEnemy attrs enemy
         11 -> scope "hemlockChapel" do
+          codexFinished 11
           flavor $ setTitle "title" >> p.green "body"
           drawOrResource 1
         12 -> scope "theOldMill" do
+          codexFinished 12
           flavor $ setTitle "title" >> p.green "body"
           theOldMill <- getJustLocationByName "The Old Mill"
           enemies <-
@@ -410,11 +427,15 @@ instance RunMessage PreludeTheFinalEvening where
                     li "letFight"
 
           if hashingItOut
-            then flavor body
+            then do
+              codexFinished 13
+              flavor body
             else storyWithChooseOneM' body do
               labeledValidate' (isJust river && riverLegacy) "sideRiver" do
+                codexFinished 13
                 createAssetAt_ Assets.riverHawthorneBigInNewYork (AtLocation theAtwoodHouse)
               labeledValidate' (isJust william && williamResolved) "sideWilliam" do
+                codexFinished 13
                 createAssetAt_ Assets.williamHemlockAspiringPoet (AtLocation theAtwoodHouse)
               labeled' "letFight" do
                 when (williamResolved || riverLegacy) $ remember TheHemlocksAreHashingItOut
@@ -428,9 +449,11 @@ instance RunMessage PreludeTheFinalEvening where
               for_ william $ labeled' "william" . takeControlOfSetAsideAsset iid
               for_ river $ labeled' "river" . takeControlOfSetAsideAsset iid
         14 -> scope "tadsGeneralStore" do
+          codexFinished 14
           flavor $ setTitle "title" >> p.green "body"
           gainResources iid source 3
         15 -> scope "valeSchoolhouse" do
+          codexFinished 15
           flavor $ setTitle "title" >> p.green "body"
           valeSchoolhouse <- getJustLocationByName "Vale Schoolhouse"
           enemies <- select $ EnemyAt (LocationWithId valeSchoolhouse) <> withTrait Resident
@@ -438,6 +461,7 @@ instance RunMessage PreludeTheFinalEvening where
             sid <- getRandom
             chooseBeginSkillTest sid iid attrs enemy [#willpower, #intellect, #combat, #agility] (Fixed 2)
         16 -> scope "theCommons" do
+          codexFinished 16
           flavor $ setTitle "title" >> p.green "body"
           locations <- select $ not_ (locationWithInvestigator iid)
           chooseOneM iid do
@@ -445,11 +469,13 @@ instance RunMessage PreludeTheFinalEvening where
             targets locations \loc -> do
               moveTo attrs iid loc
               gainActions iid attrs 1
-        100 -> scope "drRosaMarquez" do
+        Theta -> scope "drRosaMarquez" do
+          codexFinished Theta
           flavor $ setTitle "title" >> p.green "body"
           investigators <- getInvestigators
           chooseOneM iid $ for_ investigators \i -> targeting i $ drawCards i source 5
-        101 -> scope "bertieMusgrave" do
+        Omega -> scope "bertieMusgrave" do
+          codexFinished Omega
           flavor $ setTitle "title" >> p.green "body"
           chooseAndDiscardCards iid source 3
           record BertiePerished
@@ -480,13 +506,9 @@ instance RunMessage PreludeTheFinalEvening where
       addChaosToken Tablet
       addChaosToken ElderThing
       record TheInvestigatorsInterruptedTheFeast
-    flipResidentToEnemy resident =
-      selectOne (assetIs (toCardDef resident)) >>= \case
-        Nothing -> pure Nothing
-        Just aid -> do
-          mloc <- field AssetLocation aid
-          case mloc of
-            Nothing -> pure Nothing
-            Just loc -> do
-              removeFromGame aid
-              Just <$> createEnemyAt (residentEnemyDef resident) loc
+    flipResidentToEnemy resident = runMaybeT do
+      aid <- MaybeT $ selectOne (assetIs (toCardDef resident))
+      loc <- MaybeT $ field AssetLocation aid
+      lift do
+        removeFromGame aid
+        createEnemyAt (residentEnemyDef resident) loc

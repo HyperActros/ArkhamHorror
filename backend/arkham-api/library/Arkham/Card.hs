@@ -117,8 +117,10 @@ class (HasTraits a, HasCardDef a, HasCardCode a) => IsCard a where
   toTabooList _ = Nothing
   toMutated :: a -> Maybe Text
   toMutated _ = Nothing
+
 sameCard :: (IsCard a, IsCard b) => a -> b -> Bool
 sameCard a b = toCardId a == toCardId b
+
 class MonadRandom m => CardGen m where
   genEncounterCard :: HasCardDef a => a -> m EncounterCard
   genPlayerCard :: HasCardDef a => a -> m PlayerCard
@@ -192,6 +194,7 @@ genFlippedCard a = flipCard <$> genCard a
 
 genCards :: (HasCardDef a, CardGen m, Traversable t) => t a -> m (t Card)
 genCards = traverse genCard
+
 genPlayerCards :: (HasCardDef a, CardGen m, Traversable t) => t a -> m (t PlayerCard)
 genPlayerCards = traverse genPlayerCard
 
@@ -252,10 +255,12 @@ cardMatch a (toCardMatcher -> cardMatcher) = case cardMatcher of
   CardWithCardCodeExact cardCode -> CardCodeExact (toCardCode a) == cardCode
   CardWithId cardId -> toCardId a == cardId
   CardWithTitle title -> (nameTitle . cdName $ toCardDef a) == title
+  CardWithTitleContaining sub -> T.toLower sub `T.isInfixOf` T.toLower (nameTitle . cdName $ toCardDef a)
   CardWithTrait trait -> trait `member` toTraits a
   CardWithClass role -> role `member` cdClassSymbols (toCardDef a)
   CardWithLevel n -> Just n == (toCard a).level
   CardWithMaxLevel n -> maybe False (<= n) $ (toCard a).level
+  CardWithMaxPrintedHealth pc n -> maybe False (<= n) (cdHealth (toCardDef a) >>= fixedHealth pc)
   FastCard -> isJust $ cdFastWindow (toCardDef a)
   CardMatches ms -> all (cardMatch a) ms
   CardWithVengeance -> isJust . cdVengeancePoints $ toCardDef a
@@ -336,7 +341,7 @@ setTaboo mtaboo card = do
   pure result
  where
   go = \case
-    PlayerCard pc -> PlayerCard (pc {pcTabooList = mtaboo, pcMutated = tabooMutated mtaboo pc})
+    PlayerCard pc -> PlayerCard (pc {pcTabooList = mtaboo, pcMutated = tabooMutated mtaboo pc, pcChained = tabooChained mtaboo pc})
     other -> other
 
 setFacedown :: CardGen m => Bool -> Card -> m Card
@@ -346,9 +351,9 @@ setFacedown b card = do
   pure result
  where
   go = \case
+    PlayerCard pc -> PlayerCard pc {pcFacedown = Just b}
     EncounterCard ec -> EncounterCard ec {ecFacedown = Just b}
     VengeanceCard vc -> VengeanceCard (go vc)
-    other -> other
 
 data Card
   = PlayerCard PlayerCard
@@ -438,6 +443,12 @@ instance HasField "icons" Card [SkillIcon] where
 
 instance HasField "cost" Card (Maybe CardCost) where
   getField = cdCost . toCardDef
+
+instance HasField "health" Card (Maybe Health) where
+  getField = cdHealth . toCardDef
+
+instance HasField "fixedHealth" Card (Int -> Maybe Int) where
+  getField c pc = fixedHealth pc =<< c.health
 
 instance HasField "printedCost" Card Int where
   getField = (.printedCost) . toCardDef

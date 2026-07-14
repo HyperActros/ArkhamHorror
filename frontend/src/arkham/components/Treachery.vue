@@ -1,13 +1,14 @@
 <script lang="ts" setup>
-import { computed } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { useDebug } from '@/arkham/debug';
 import { cardImage } from '@/arkham/cardImages';
 import type { Game } from '@/arkham/types/Game';
-import { TokenType } from '@/arkham/types/Token';
 import * as ArkhamGame from '@/arkham/types/Game';
 import type { AbilityLabel, AbilityMessage, Message } from '@/arkham/types/Message';
-import PoolItem from '@/arkham/components/PoolItem.vue';
+import TokenPool from '@/arkham/components/TokenPool.vue';
 import AbilityButton from '@/arkham/components/AbilityButton.vue'
+import AbilitiesMenu from '@/arkham/components/AbilitiesMenu.vue'
+import { IsMobile } from '@/arkham/isMobile'
 import Token from '@/arkham/components/Token.vue';
 import * as Arkham from '@/arkham/types/Treachery';
 
@@ -18,6 +19,7 @@ export interface Props {
   attached?: boolean
   overlayDelay?: number
   isInHand?: boolean
+  mobileHandOpen?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), { attached: false })
@@ -27,6 +29,13 @@ const emits = defineEmits<{ choose: [value: number] }>()
 const choose = (idx: number) => emits('choose', idx)
 
 const debug = useDebug()
+const { isMobile } = IsMobile()
+const cardFrame = ref<HTMLElement | null>(null)
+const showAbilities = ref(false)
+
+watch(() => props.mobileHandOpen, (open) => {
+  if (open === false) showAbilities.value = false
+})
 const image = computed(() => cardImage(props.treachery.cardCode))
 const id = computed(() => props.treachery.id)
 const choices = computed(() => ArkhamGame.choices(props.game, props.playerId))
@@ -70,21 +79,24 @@ const abilities = computed(() => {
     }, []);
 })
 
-const doom = computed(() => props.treachery.tokens[TokenType.Doom])
-const brilliance = computed(() => props.treachery.tokens[TokenType.Brilliance])
-const clues = computed(() => props.treachery.tokens[TokenType.Clue])
-const resources = computed(() => props.treachery.tokens[TokenType.Resource])
-const charges = computed(() => props.treachery.tokens[TokenType.Charge])
-const horror = computed(() => props.treachery.tokens[TokenType.Horror])
-const damage = computed(() => props.treachery.tokens[TokenType.Damage])
-const evidence = computed(() => props.treachery.tokens[TokenType.Evidence])
-
+const tokenOverrides = { Damage: { type: 'damage' } }
 const cardAction = computed(() => choices.value.findIndex(canInteract))
+const canUseMobileAbilityMenu = computed(() => isMobile && props.isInHand && abilities.value.length > 0)
+const canHighlight = computed(() => cardAction.value !== -1 || canUseMobileAbilityMenu.value)
+
+function handleCardClick() {
+  if (canUseMobileAbilityMenu.value) {
+    showAbilities.value = true
+    return
+  }
+
+  emits('choose', cardAction.value)
+}
 </script>
 <template>
   <div class="treachery" :class="{ attached, exhausted: isExhausted }">
     <AbilityButton
-      v-if="isInHand"
+      v-if="isInHand && !canUseMobileAbilityMenu"
       v-for="ability in abilities"
       :key="ability.index"
       :ability="ability.contents"
@@ -93,10 +105,11 @@ const cardAction = computed(() => choices.value.findIndex(canInteract))
       @click="$emit('choose', ability.index)"
     />
     <img
+      ref="cardFrame"
       :src="image"
       class="card"
-      :class="{ 'treachery--can-interact': cardAction !== -1, attached }"
-      @click="$emit('choose', cardAction)"
+      :class="{ 'treachery--can-interact': canHighlight, attached, 'in-hand': isInHand }"
+      @click="handleCardClick"
       :data-delay="overlayDelay"
     />
     <AbilityButton
@@ -108,39 +121,17 @@ const cardAction = computed(() => choices.value.findIndex(canInteract))
       :game="game"
       @click="$emit('choose', ability.index)"
     />
+    <AbilitiesMenu
+      v-if="canUseMobileAbilityMenu"
+      v-model="showAbilities"
+      :game="game"
+      :abilities="abilities"
+      :frame="cardFrame"
+      position="top"
+      @choose="$emit('choose', $event)"
+    />
     <div class="pool">
-      <PoolItem
-        v-if="horror && horror > 0"
-        type="horror"
-        :amount="horror"
-      />
-      <PoolItem
-        v-if="damage && damage > 0"
-        type="damage"
-        :amount="damage"
-      />
-      <PoolItem
-        v-if="clues && clues > 0"
-        type="clue"
-        :amount="clues"
-      />
-      <PoolItem
-        v-if="resources && resources > 0"
-        type="resource"
-        :amount="resources"
-      />
-      <PoolItem
-        v-if="charges && charges > 0"
-        type="resource"
-        :amount="charges"
-      />
-      <PoolItem
-        v-if="doom && doom > 0"
-        type="doom"
-        :amount="doom"
-      />
-      <PoolItem v-if="evidence && evidence > 0" type="resource" tooltip="Evidence" :amount="evidence" />
-      <PoolItem v-if="brilliance && brilliance > 0" type="resource" tooltip="Brilliance" :amount="brilliance" />
+      <TokenPool :tokens="treachery.tokens" :overrides="tokenOverrides" />
       <Token v-for="(sealedToken, index) in treachery.sealedChaosTokens" :key="index" :token="sealedToken" :playerId="playerId" :game="game" @choose="choose" />
     </div>
 
@@ -188,7 +179,7 @@ const cardAction = computed(() => choices.value.findIndex(canInteract))
     width: unset;
   }
   :deep(img) {
-    width: 20px;
+    width: var(--card-token-width);
     height: auto;
   }
 

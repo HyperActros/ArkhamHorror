@@ -1,5 +1,6 @@
 import * as JsonDecoder from 'ts.data.json';
-import { v2Optional } from '@/arkham/parser';
+import { v2Optional, withDefault } from '@/arkham/parser';
+import { AiFocus } from '@/arkham/types/NewGame';
 import { Investigator, InvestigatorDetails, investigatorDecoder, investigatorDetailsDecoder } from '@/arkham/types/Investigator';
 import { Modifier, modifierDecoder } from '@/arkham/types/Modifier';
 import { ConcealedCard, concealedCardDecoder } from '@/arkham/types/ConcealedCard';
@@ -28,6 +29,67 @@ export type { TarotCard } from '@/arkham/types/TarotCard';
 import { History, historyDecoder } from '@/arkham/types/History';
 
 type GameState = { tag: 'IsPending', contents: string[] } | { tag: 'IsActive' } | { tag: 'IsOver' } | { tag: 'IsChooseDecks', contents: string[] };
+
+type AsIfRuling = 'chapter1' | 'chapter2'
+
+// Per-seat AI state serialized into the game blob (Arkham.Ai.State.AiPlayerState),
+// surfaced under `settings.aiPlayers` keyed by playerId so the UI can read which
+// seats are AI, their enable flag, focus override, response delay, and priorities.
+export type AiPlayerState = {
+  aiEnabled: boolean
+  aiInvestigatorCode: string
+  aiFocusOverride: AiFocus | null
+  aiPriorities: Target[]
+  aiResponseDelayMs: number
+}
+
+type GameSettings = {
+  settingsAbilitiesCannotReactToThemselves: boolean
+  settingsAsIfRuling: AsIfRuling
+  settingsStrictAsIfAt: boolean
+  settingsUltimatumsAndBoons: string[]
+  settingsUltimatumsAndBoonsEnabled: boolean
+  // Ultimatum of Ultimatums' per-game random roll (a tag like "BoonOfHermes");
+  // re-rolled each scenario.
+  settingsRolledUltimatumOrBoon: string | null
+  // Card codes banned by Ultimatum of The Scream.
+  settingsScreamedAllies: string[]
+  // Whether official campaign achievements are tracked for this game.
+  settingsAchievementsEnabled: boolean
+  aiPlayers: Record<string, AiPlayerState>
+}
+
+const aiFocusDecoder = JsonDecoder.oneOf<AiFocus>([
+  JsonDecoder.literal('combat'),
+  JsonDecoder.literal('investigate'),
+  JsonDecoder.literal('evade'),
+  JsonDecoder.literal('support'),
+  JsonDecoder.literal('survival'),
+  JsonDecoder.literal('mobility'),
+], 'AiFocus')
+
+const aiPlayerStateDecoder = JsonDecoder.object<AiPlayerState>({
+  aiEnabled: withDefault(true, JsonDecoder.boolean()),
+  aiInvestigatorCode: JsonDecoder.string(),
+  aiFocusOverride: withDefault<AiFocus | null>(null, aiFocusDecoder),
+  aiPriorities: withDefault<Target[]>([], JsonDecoder.array(targetDecoder, 'Target[]')),
+  aiResponseDelayMs: withDefault(1500, JsonDecoder.number()),
+}, 'AiPlayerState')
+
+const gameSettingsDecoder = JsonDecoder.object<GameSettings>({
+  settingsAbilitiesCannotReactToThemselves: JsonDecoder.boolean(),
+  settingsAsIfRuling: JsonDecoder.oneOf<AsIfRuling>([
+    JsonDecoder.literal('chapter1'),
+    JsonDecoder.literal('chapter2'),
+  ], 'AsIfRuling'),
+  settingsStrictAsIfAt: JsonDecoder.boolean(),
+  settingsUltimatumsAndBoons: withDefault<string[]>([], JsonDecoder.array(JsonDecoder.string(), 'string[]')),
+  settingsUltimatumsAndBoonsEnabled: withDefault(true, JsonDecoder.boolean()),
+  settingsRolledUltimatumOrBoon: withDefault<string | null>(null, JsonDecoder.string()),
+  settingsScreamedAllies: withDefault<string[]>([], JsonDecoder.array(JsonDecoder.string(), 'string[]')),
+  settingsAchievementsEnabled: withDefault(true, JsonDecoder.boolean()),
+  aiPlayers: withDefault<Record<string, AiPlayerState>>({}, JsonDecoder.record<AiPlayerState>(aiPlayerStateDecoder, 'Dict<PlayerId, AiPlayerState>')),
+}, 'GameSettings')
 
 export const gameStateDecoder = JsonDecoder.oneOf<GameState>(
   [
@@ -67,6 +129,7 @@ export type Game = {
   id: string;
   name: string;
   log: string[];
+  settings: GameSettings;
 
   activeInvestigatorId: string;
   acts: Record<string, Act>;
@@ -86,6 +149,7 @@ export type Game = {
   concealed: Record<string, ConcealedCard>;
   phase: Phase;
   phaseStep: PhaseStep | null;
+  inAction: boolean;
   playerOrder: string[];
   playerCount: number;
   question: Record<string, Question>;
@@ -96,6 +160,7 @@ export type Game = {
   skillTestResults: SkillTestResults | null;
   treacheries: Record<string, Treachery>;
   focusedCards: Card[];
+  highlightedCards: string[];
   focusedTarotCards: TarotCard[];
   foundCards: Record<string, Card[]>;
   focusedChaosTokens: ChaosToken[];
@@ -115,7 +180,13 @@ export type Game = {
   roundHistory: Record<string, History>;
   phaseHistory: Record<string, History>;
   turnHistory: Record<string, History>;
+  enemyAttackTargets: EnemyAttackTarget[];
 }
+
+export type EnemyAttackTarget = {
+  enemy: string;
+  target: Target;
+};
 
 const choicesCache = new WeakMap<Game, Map<string, Message[]>>();
 const choicesSourceCache = new WeakMap<Game, Map<string, Source | null>>();
@@ -172,6 +243,21 @@ export function choices(game: Game, playerId: string): Message[] {
   });
 }
 
+// True when the player's active question is a fast/action player window (the
+// backend's `PlayerWindowChooseOne`, normalized to `ChooseOne` with `isPlayerWindow`).
+// Used to distinguish a genuine "play this card" choice from an unrelated prompt that
+// merely happens to offer the same card as a target (e.g. a search popup).
+export function activeQuestionIsPlayerWindow(game: Game, playerId: string): boolean {
+  let question: Question | undefined = game.question[playerId];
+
+  while (question) {
+    if (question.tag === 'ChooseOne') return question.isPlayerWindow === true;
+    question = 'question' in question ? question.question : undefined;
+  }
+
+  return false;
+}
+
 // Returns the Source that prompted the player's active question, if any. The
 // engine wraps such questions in `QuestionWithSource` so the frontend can
 // highlight the source entity on the board while the question is pending.
@@ -201,6 +287,40 @@ export function choicesTooltip(game: Game, playerId: string): string | null {
 
     return null;
   });
+}
+
+// When the player is assigning damage/horror, the engine wraps the assignment
+// `ChooseOne` in a `QuestionLabel` whose label states the totals still to apply
+// (e.g. "Assign 2 damage and 1 horror"). Returns the remaining token counts so
+// the UI can show the tokens that still need placing (and suppress the modal).
+export function damageAssignmentTokens(
+  game: Game,
+  playerId: string,
+): { damage: number; horror: number } | null {
+  // The assignment ChooseOne may be wrapped in a QuestionLabel (totals) and a
+  // QuestionWithSource (damage source highlight). Walk down to the ChooseOne,
+  // remembering the label that carries the remaining counts.
+  let question: Question | undefined = game.question[playerId];
+  let label: string | null = null;
+  while (question) {
+    if (question.tag === 'QuestionLabel') label = question.label;
+    if (question.tag === 'ChooseOne') break;
+    question = 'question' in question ? question.question : undefined;
+  }
+  if (!question || question.tag !== 'ChooseOne' || label === null) return null;
+  const assigningDamage = question.choices.some(
+    (c) =>
+      c.tag === MessageType.COMPONENT_LABEL &&
+      'tokenType' in c.component &&
+      (c.component.tokenType === 'DamageToken' || c.component.tokenType === 'HorrorToken'),
+  );
+  if (!assigningDamage) return null;
+  const damageMatch = label.match(/(\d+)\s+damage/);
+  const horrorMatch = label.match(/(\d+)\s+horror/);
+  return {
+    damage: damageMatch ? parseInt(damageMatch[1], 10) : 0,
+    horror: horrorMatch ? parseInt(horrorMatch[1], 10) : 0,
+  };
 }
 
 type Mode = {
@@ -244,6 +364,8 @@ export const gameDecoder: JsonDecoder.Decoder<Game> = JsonDecoder.object(
     id: JsonDecoder.string(),
     name: JsonDecoder.string(),
     log: JsonDecoder.array(JsonDecoder.string(), 'LogEntry[]'),
+    settings: v2Optional(gameSettingsDecoder),
+    gameSettings: v2Optional(gameSettingsDecoder),
 
     activeInvestigatorId: JsonDecoder.string(),
     acts: JsonDecoder.record<Act>(actDecoder, 'Dict<UUID, Act>'),
@@ -263,6 +385,7 @@ export const gameDecoder: JsonDecoder.Decoder<Game> = JsonDecoder.object(
     concealed: JsonDecoder.record<ConcealedCard>(concealedCardDecoder, 'Dict<UUID, ConcealedCard>'),
     phase: phaseDecoder,
     phaseStep: JsonDecoder.nullable(phaseStepDecoder),
+    inAction: v2Optional(JsonDecoder.boolean()),
     playerOrder: JsonDecoder.array(JsonDecoder.string(), 'PlayerOrder[]'),
     playerCount: JsonDecoder.number(),
     question: JsonDecoder.record<Question>(questionDecoder, 'Dict<InvestigatorId, Question>'),
@@ -272,6 +395,7 @@ export const gameDecoder: JsonDecoder.Decoder<Game> = JsonDecoder.object(
     skillTestResults: JsonDecoder.nullable(skillTestResultsDecoder),
     treacheries: JsonDecoder.record<Treachery>(treacheryDecoder, 'Dict<UUID, Treachery>'),
     focusedCards: JsonDecoder.array<Card>(cardDecoder, 'Card[]'),
+    highlightedCards: JsonDecoder.array<string>(JsonDecoder.string(), 'string[]'),
     focusedTarotCards: JsonDecoder.array<TarotCard>(tarotCardDecoder, 'TarotCard[]'),
     foundCards: JsonDecoder.record<Card[]>(JsonDecoder.array(cardDecoder, 'Card[]'), 'Dict<string, Card[]>'),
     focusedChaosTokens: JsonDecoder.array<ChaosToken>(chaosTokenDecoder, 'Token[]'),
@@ -291,12 +415,25 @@ export const gameDecoder: JsonDecoder.Decoder<Game> = JsonDecoder.object(
     roundHistory: v2Optional(JsonDecoder.record<History>(historyDecoder, 'Dict<InvestigatorId, History>')),
     phaseHistory: v2Optional(JsonDecoder.record<History>(historyDecoder, 'Dict<InvestigatorId, History>')),
     turnHistory: v2Optional(JsonDecoder.record<History>(historyDecoder, 'Dict<InvestigatorId, History>')),
+    enemyAttackTargets: JsonDecoder.fallback([], JsonDecoder.array(JsonDecoder.object<EnemyAttackTarget>({ enemy: JsonDecoder.string(), target: targetDecoder }, 'EnemyAttackTarget'), 'EnemyAttackTarget[]')),
   },
   'Game',
-).map(({mode, killedInvestigators, undoActionStep, undoTurnStep, undoPhaseStep, undoRoundStep, roundHistory, phaseHistory, turnHistory, ...game}) => ({
+).map(({mode, killedInvestigators, settings, gameSettings, inAction, undoActionStep, undoTurnStep, undoPhaseStep, undoRoundStep, roundHistory, phaseHistory, turnHistory, ...game}) => ({
   scenario: mode?.That ?? null,
   campaign: mode?.This ?? null,
   killedInvestigators: killedInvestigators ?? {},
+  inAction: inAction ?? false,
+  settings: settings ?? gameSettings ?? {
+    settingsAbilitiesCannotReactToThemselves: true,
+    settingsAsIfRuling: 'chapter1',
+    settingsStrictAsIfAt: false,
+    settingsUltimatumsAndBoons: [],
+    settingsUltimatumsAndBoonsEnabled: true,
+    settingsRolledUltimatumOrBoon: null,
+    settingsScreamedAllies: [],
+    settingsAchievementsEnabled: true,
+    aiPlayers: {},
+  },
   undoActionStep: undoActionStep ?? null,
   undoTurnStep: undoTurnStep ?? null,
   undoPhaseStep: undoPhaseStep ?? null,

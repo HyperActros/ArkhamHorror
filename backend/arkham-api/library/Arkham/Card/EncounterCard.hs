@@ -50,17 +50,24 @@ instance HasCardCode EncounterCard where
   toCardCode = ecCardCode
 
 instance HasCardDef EncounterCard where
-  toCardDef c = case lookup (ecCardCode c) allEncounterCards of
-    Just def -> def
-    Nothing ->
-      error $ "missing card def for encounter card " <> show (ecCardCode c)
+  toCardDef c =
+    fromMaybe
+      ( error
+          $ "missing card def for encounter card "
+          <> show (ecCardCode c)
+          <> "\n"
+          <> prettyCallStack callStack
+      )
+      $ lookup (ecCardCode c) allEncounterCards
+      <|> lookup (ecOriginalCardCode c) allEncounterCards
+      <|> lookup (flippedCardCode $ ecCardCode c) allEncounterCards
 
 instance Named EncounterCard where
   toName = toName . toCardDef
 
 instance HasOriginalCardCode EncounterCard where
   toOriginalCardCode = ecOriginalCardCode
-  setOriginalCardCode (toCardCode -> cCode) ec = ec { ecOriginalCardCode = cCode }
+  setOriginalCardCode (toCardCode -> cCode) ec = ec {ecOriginalCardCode = cCode}
 
 lookupEncounterCard :: CardDef -> CardId -> EncounterCard
 lookupEncounterCard cardDef cardId =

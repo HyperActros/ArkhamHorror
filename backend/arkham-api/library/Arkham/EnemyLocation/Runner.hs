@@ -23,7 +23,7 @@ import Arkham.Target as X
 
 import Arkham.Action qualified as Action
 import Arkham.Attack (enemyAttack)
-import Arkham.Attack.Types (AttackTarget (..), EnemyAttackDetails (..))
+import Arkham.Attack.Types (AttackTarget (..), EnemyAttackDetails (..), EnemyAttackType (..))
 import Arkham.Capability
 import Arkham.Card
 import Arkham.Classes.HasGame
@@ -32,6 +32,8 @@ import Arkham.Damage (DamageType (..))
 import Arkham.DamageEffect (DamageAssignment (..))
 import Arkham.DefeatedBy
 import Arkham.Direction
+import Arkham.Discover (DiscoverLocation (DiscoverAtLocation))
+import Arkham.Helpers.Discover (resolveDiscoverCluesAt, resolveSuccessfulInvestigation)
 import Arkham.ForMovement (ForMovement (..))
 import Arkham.Helpers.Calculation (calculate)
 import Arkham.Helpers.Modifiers
@@ -39,6 +41,7 @@ import Arkham.Helpers.Source (getSourceController)
 import Arkham.Helpers.Window (checkAfter, checkWindows, frame)
 import Arkham.History
 import Arkham.Investigator.Types (Field (..))
+import Arkham.Keyword qualified as Keyword
 import Arkham.Location.Base (directionsL, labelL, positionL, tokensL, withoutCluesL)
 import Arkham.Location.Grid
 import Arkham.Matcher (
@@ -143,11 +146,33 @@ instance RunMessage EnemyLocationAttrs where
           , criteria = Nothing
           }
       pure a
+    -- Enemy-locations aren't regular Location entities, so the Location runner's
+    -- Successful/DiscoverClues handlers never fire for them. Mirror them here via
+    -- the shared helpers so investigators can actually discover clues on an
+    -- enemy-location (e.g. a Living Bedroom holding clues).
+    Successful (Action.Investigate, _) iid source target n | isTarget a target -> do
+      resolveSuccessfulInvestigation a.id (toSource a) iid source n
+      pure a
+    Msg.DiscoverClues iid d | d.location == DiscoverAtLocation a.id -> do
+      resolveDiscoverCluesAt a.id iid d
+      pure a
     PassedSkillTest iid (Just Action.Fight) source (Initiator target) _ n | isEnemyTarget a target -> do
       Fight.pushSuccessfulAttack iid source (asEnemyId a) n
       pure a
     PassedSkillTest iid (Just Action.Evade) source (Initiator target) _ n | isEnemyTarget a target -> do
       Evade.pushSuccessfulEvade iid source (asEnemyId a) n
+      pure a
+    FailedSkillTest iid (Just Action.Fight) _ (Initiator target) _ _ | isEnemyTarget a target -> do
+      mods <- getCombinedModifiers [toTarget iid, toTarget a]
+      let keywords = cdKeywords (toCardDef a)
+      when
+        ( Keyword.Retaliate `member` keywords
+            && IgnoreRetaliate `notElem` mods
+            && (not a.exhausted || CanRetaliateWhileExhausted `elem` mods)
+        )
+        $ push
+        $ EnemyAttack
+        $ (enemyAttack (asEnemyId a) a iid) {attackType = RetaliateAttack}
       pure a
     EnemyEvaded _ eid | eid == asEnemyId a -> pure $ a & exhaustedL .~ True
     Exhaust ea | isEnemyTarget a ea.target -> pure $ a & exhaustedL .~ True
@@ -255,6 +280,13 @@ instance RunMessage EnemyLocationAttrs where
         pushM $ checkAfter $ Window.LastClueRemovedFromLocation a.id
       pure $ a & baseL . tokensL %~ setTokens Clue clueCount & baseL . withoutCluesL .~ (clueCount == 0)
     RemoveTokens _ (isTarget a -> True) token n -> pure $ a & baseL . tokensL %~ subtractTokens token n
+    -- Mirror the Location runner: MoveTokens splits into a remove from the source
+    -- location and a place onto the target. Enemy-locations aren't Location
+    -- entities, so without this the "remove from source" half never runs and
+    -- discovered clues are duplicated onto the investigator instead of moved.
+    MoveTokens s source _ tType n | isSource a source -> liftRunMessage (RemoveTokens s (toTarget a) tType n) a
+    MoveTokens _s (InvestigatorSource _) target Clue _ | isTarget a target -> pure a
+    MoveTokens s _ target tType n | isTarget a target -> liftRunMessage (PlaceTokens s target tType n) a
     -- Enemy-locations are fixed in the grid and cannot be moved by card effects.
     EnemyMove eid _ | eid == asEnemyId a -> pure a
     SetLocationLabel lid label' | lid == a.id -> pure $ a & baseL . labelL .~ label'

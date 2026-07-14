@@ -61,12 +61,16 @@ function imageFor(tokenFace: string) {
       return imgsrc("ct_curse.png");
     case 'FrostToken':
       return imgsrc("ct_frost.png");
+    case 'MoonToken':
+      return imgsrc("ct_moon.png");
     default:
       return imgsrc("ct_blank.png");
   }
 }
 
 const revealedChaosTokens = computed(() => {
+  if (props.skillTest) return props.game.skillTestChaosTokens
+
   if (props.game.focusedChaosTokens.length > 0) {
     const tokens = [...props.game.skillTestChaosTokens, ...props.game.focusedChaosTokens]
     return Array.from(new Set(tokens.map((token) => JSON.stringify(token))))
@@ -80,7 +84,7 @@ const choices = computed(() => ArkhamGame.choices(props.game, props.playerId))
 const tokenAction = computed(() => choices.value.findIndex((c) => c.tag === MessageType.START_SKILL_TEST_BUTTON))
 const debug = useDebug()
 const allTokenFaces = computed(() => props.chaosBag.chaosTokens.map(t => t.face).sort(sortTokenFaces))
-const tokenOrder = ['PlusOne', 'Zero', 'MinusOne', 'MinusTwo', 'MinusThree', 'MinusFour', 'MinusFive', 'MinusSix', 'MinusSeven', 'MinusEight', 'Skull', 'Cultist', 'Tablet', 'ElderThing', 'AutoFail', 'ElderSign', 'CurseToken', 'BlessToken', 'FrostToken']
+const tokenOrder = ['PlusOne', 'Zero', 'MinusOne', 'MinusTwo', 'MinusThree', 'MinusFour', 'MinusFive', 'MinusSix', 'MinusSeven', 'MinusEight', 'Skull', 'Cultist', 'Tablet', 'ElderThing', 'AutoFail', 'ElderSign', 'CurseToken', 'BlessToken', 'FrostToken', 'MoonToken']
 
 function sortTokenFaces(a: string, b: string) {
   return tokenOrder.indexOf(a) - tokenOrder.indexOf(b)
@@ -124,7 +128,7 @@ const choose = (idx: number) => emit('choose', idx)
 
 <style scoped>
 .token--can-draw {
-  border: min(5px, 1vw) solid #ff00ff;
+  border: min(5px, 1vw) solid var(--select);
   border-radius: 500px;
   cursor: pointer;
 }
@@ -218,7 +222,7 @@ const choose = (idx: number) => emit('choose', idx)
   display: inline;
   img {
     cursor: pointer;
-    border: 1px solid #ff00ff;
+    border: 1px solid var(--select);
     border-radius: 30px;
     width: 30px;
     &.token-big {

@@ -1,6 +1,6 @@
 <script lang="ts" setup>
 import UpgradeDeck from '@/arkham/components/UpgradeDeck.vue';
-import { EyeIcon, QuestionMarkCircleIcon, ViewColumnsIcon, ArchiveBoxXMarkIcon, ArrowPathIcon, LockClosedIcon, LockOpenIcon, ArrowUturnLeftIcon } from '@heroicons/vue/20/solid'
+import { EyeIcon, QuestionMarkCircleIcon, ViewColumnsIcon, ArchiveBoxXMarkIcon, ArrowPathIcon, LockClosedIcon, LockOpenIcon, ArrowUturnLeftIcon, ArrowsPointingOutIcon, ArrowsPointingInIcon } from '@heroicons/vue/20/solid'
 import {
   watchEffect,
   watch,
@@ -25,10 +25,13 @@ import { TarotCard, tarotCardImage } from '@/arkham/types/TarotCard';
 import { TokenType } from '@/arkham/types/Token';
 import { ModifierType, Hollow } from '@/arkham/types/Modifier';
 import { Source } from '@/arkham/types/Source';
+import { type Target } from '@/arkham/types/Target';
 import { Message, AbilityMessage, AbilityLabel } from '@/arkham/types/Message';
 import { MessageType } from '@/arkham/types/Message';
 import { waitForImagesToLoad, imgsrc, groupBy } from '@/arkham/helpers';
+import { gameLocalStorageKey, getGameLocalStorageItem, setGameLocalStorageItem } from '@/arkham/localStorage';
 import { cardImage as cardCodeImage } from '@/arkham/cardImages';
+import { fullName } from '@/arkham/types/Name';
 import { useMenu } from '@/composable/menu';
 import { useSettings } from '@/stores/settings';
 import { keyToId } from '@/arkham/types/Key'
@@ -49,14 +52,15 @@ import EncounterDeck from '@/arkham/components/EncounterDeck.vue';
 import VictoryDisplay from '@/arkham/components/VictoryDisplay.vue';
 import SkillTest from '@/arkham/components/SkillTest.vue';
 import ScenarioDeck from '@/arkham/components/ScenarioDeck.vue';
+import ScenarioDebug from '@/arkham/components/ScenarioDebug.vue';
 import CardsUnderIndicator from '@/arkham/components/CardsUnderIndicator.vue';
 import Story from '@/arkham/components/Story.vue';
 import Asset from '@/arkham/components/Asset.vue';
 import Location from '@/arkham/components/Location.vue';
 import TreacheryView from '@/arkham/components/Treachery.vue';
 import { useGameChoices } from '@/arkham/composables/useGameChoices';
-import { setLocationOffset, resetLocationOffsets } from '@/arkham/api';
-import { useDebug } from '@/arkham/debug'
+import { setLocationOffset, resetLocationOffsets, updateGameRaw } from '@/arkham/api';
+import { useDebug, scenarioHasDebugOptions } from '@/arkham/debug'
 import { storeToRefs } from 'pinia';
 import { useI18n } from 'vue-i18n';
 import { IsMobile } from '@/arkham/isMobile';
@@ -74,9 +78,11 @@ export interface Props {
   game: Game
   scenario: Scenario
   playerId: string
+  realityAcidLightDevoured?: boolean
+  realityAcidLightActive?: boolean
 }
 const props = defineProps<Props>()
-const emit = defineEmits(['choose'])
+const emit = defineEmits(['choose', 'toggleRealityAcidLight'])
 const debug = useDebug()
 const { addEntry, removeEntry } = useMenu()
 
@@ -94,11 +100,19 @@ const showChaosBag = ref(false)
 const showOutOfPlay = ref(false)
 const forcedShowOutOfPlay = ref(false)
 const forcedShowDiscard = ref(false)
-const forcedShowHollowed = ref(false)
 const encounterDiscardPopoverShown = ref(false)
+const spectralDiscardPopoverShown = ref(false)
+const hollowedPopoverShown = ref(false)
+const showScenarioDebugOptions = ref(false)
+const realityAcidLightAnchor = ref<HTMLElement | null>(null)
+const realityAcidLightRect = reactive({ left: 0, top: 0, width: 0, height: 0 })
 const locationMap = ref<Element | null>(null)
+const locationCardsContainer = ref<HTMLElement | null>(null)
 const scrollerRef = ref<HTMLElement | null>(null)
+const hiddenLocationActionEdges = ref({ top: false, right: false, bottom: false, left: false })
+const hasHiddenLocationActionEdge = computed(() => Object.values(hiddenLocationActionEdges.value).some(Boolean))
 const viewingDiscard = ref(false)
+const revealingCards = ref(false)
 const cardRowTitle = ref("")
 // Atlach Nacha specific refs
 const previousRotation = ref(0)
@@ -107,8 +121,21 @@ const legsSet = ref(["legs1", "legs2", "legs3", "legs4"])
 let legObserver: MutationObserver | null = null
 let cosmicEmissaryObserver: MutationObserver | null = null
 let cosmicEmissaryResizeObserver: ResizeObserver | null = null
+let hiddenLocationActionObserver: MutationObserver | null = null
+let hiddenLocationActionResizeObserver: ResizeObserver | null = null
+let hiddenLocationActionRaf: number | null = null
+let stagePan: { pointerId: number, startX: number, startY: number, scrollLeft: number, scrollTop: number, moved: boolean } | null = null
+let suppressNextStageClick = false
 let cosmicEmissaryCompactRequest: number | null = null
 let cosmicEmissaryCompactForce = false
+
+function updateRealityAcidLightRect() {
+  const rect = (realityAcidLightAnchor.value ?? document.querySelector<HTMLElement>('.reality-acid-light-switch-anchor'))?.getBoundingClientRect()
+  realityAcidLightRect.left = rect?.left ?? 0
+  realityAcidLightRect.top = rect?.top ?? 0
+  realityAcidLightRect.width = rect?.width ?? 0
+  realityAcidLightRect.height = rect?.height ?? 0
+}
 
 function readStyleMapCache(key: string): Record<string, Record<string, string>> {
   try {
@@ -134,27 +161,26 @@ function writeStyleMapCache(key: string, value: Record<string, Record<string, st
   }
 }
 
-const cosmicEmissaryEnemyStylesCacheKey = `game:${props.game.id}:cosmicEmissaryEnemyStyles`
-const cosmicEmissaryLocationCellStylesCacheKey = `game:${props.game.id}:cosmicEmissaryLocationCellStyles`
-const cosmicEmissaryAnimationSettingKey = `game:${props.game.id}:enableCosmicEmissaryAnimation`
-const legacyDisableCosmicEmissaryAnimationSettingKey = `game:${props.game.id}:disableCosmicEmissaryAnimation`
+const cosmicEmissaryEnemyStylesCacheKey = gameLocalStorageKey(props.game.id, 'cosmicEmissaryEnemyStyles')
+const cosmicEmissaryLocationCellStylesCacheKey = gameLocalStorageKey(props.game.id, 'cosmicEmissaryLocationCellStyles')
+const cosmicEmissaryAnimationSettingKey = gameLocalStorageKey(props.game.id, 'enableCosmicEmissaryAnimation')
 const cachedCosmicEmissaryEnemyStyles = readStyleMapCache(cosmicEmissaryEnemyStylesCacheKey)
 const cachedCosmicEmissaryLocationCellStyles = readStyleMapCache(cosmicEmissaryLocationCellStylesCacheKey)
 const cosmicEmissaryEnemyStyles = ref<Record<string, Record<string, string>>>(cachedCosmicEmissaryEnemyStyles)
 const cosmicEmissaryLocationCellStyles = ref<Record<string, Record<string, string>>>(cachedCosmicEmissaryLocationCellStyles)
 const cosmicEmissaryFormationHasMeasured = ref(Object.keys(cachedCosmicEmissaryEnemyStyles).length > 0)
 const enableCosmicEmissaryAnimation = ref(
-  localStorage.getItem(cosmicEmissaryAnimationSettingKey) === null
-    ? localStorage.getItem(legacyDisableCosmicEmissaryAnimationSettingKey) !== 'true'
-    : localStorage.getItem(cosmicEmissaryAnimationSettingKey) !== 'false'
+  getGameLocalStorageItem(props.game.id, 'enableCosmicEmissaryAnimation') === null
+    ? getGameLocalStorageItem(props.game.id, 'disableCosmicEmissaryAnimation') !== 'true'
+    : getGameLocalStorageItem(props.game.id, 'enableCosmicEmissaryAnimation') !== 'false'
 )
-const locationsZoom = ref(parseFloat(localStorage.getItem(`game:${props.game.id}:locationsZoom`) ?? '1'))
+const locationsZoom = ref(parseFloat(getGameLocalStorageItem(props.game.id, 'locationsZoom') ?? '1'))
 const doubleZoomActive = ref(false)
 const doubleZoomPrevValue = ref(1)
 const doubleZoomPrevScroll = { left: 0, top: 0 }
 const DOUBLE_ZOOM_LEVEL = 3
 watch(locationsZoom, async (value) => {
-  localStorage.setItem(`game:${props.game.id}:locationsZoom`, String(value))
+  setGameLocalStorageItem(props.game.id, 'locationsZoom', String(value))
   await updateScrollMargins()
 })
 
@@ -175,6 +201,12 @@ function decreaseZoom() {
 }
 
 const locationsUnlocked = ref(false)
+const locationsFullscreen = ref(false)
+function onFullscreenKeydown(event: KeyboardEvent) {
+  if (event.key === 'Escape' && locationsFullscreen.value) {
+    locationsFullscreen.value = false
+  }
+}
 const draggingLocationId = ref<string | null>(null)
 // Optimistic offsets after a drop, kept until the server echoes them back.
 // Stored in canonical (rotationSteps=0) coordinates, same as the backend.
@@ -369,9 +401,9 @@ function onLocationPointerDown(event: PointerEvent, location: { id: string }) {
     rotationAtStart: rotationSteps.value,
     moved: false,
   }
-  window.addEventListener('pointermove', onWindowPointerMove)
-  window.addEventListener('pointerup', onWindowPointerUp)
-  window.addEventListener('pointercancel', onWindowPointerUp)
+  window.addEventListener('pointermove', onWindowPointerMove, { passive: true })
+  window.addEventListener('pointerup', onWindowPointerUp, { passive: true })
+  window.addEventListener('pointercancel', onWindowPointerUp, { passive: true })
 }
 
 function onWindowPointerMove(event: PointerEvent) {
@@ -450,6 +482,13 @@ function toggleLocationsUnlocked() {
   nextTick(() => window.dispatchEvent(new Event('arkham-location-layout-change')))
 }
 
+function suppressLocationInteractionWhenUnlocked(event: MouseEvent) {
+  if (!locationsUnlocked.value) return
+  event.preventDefault()
+  event.stopPropagation()
+  event.stopImmediatePropagation()
+}
+
 function clearCosmicEmissaryCompactStyles() {
   cosmicEmissaryEnemyStyles.value = {}
   cosmicEmissaryLocationCellStyles.value = {}
@@ -513,14 +552,189 @@ const onCosmicEmissarySettingChange = (event: Event) => {
   if (detail?.key === cosmicEmissaryAnimationSettingKey) updateCosmicEmissaryAnimationSetting(detail.value ?? null)
 }
 
+function proxyClippedLocationClick(event: MouseEvent) {
+  if (event.defaultPrevented || event.button !== 0) return
+
+  const target = event.target as HTMLElement | null
+  if (!target?.closest('.location-cards-container')) return
+  if (target.closest('.location-cell, .draggable, button, a, input, select, textarea, [role="button"]')) return
+
+  const cell = [...document.querySelectorAll<HTMLElement>('.location-cell--can-interact')]
+    .find((el) => {
+      const rects = [el, ...el.querySelectorAll<HTMLElement>('.location-wrapper, .location, .card-frame')]
+        .map((node) => node.getBoundingClientRect())
+        .filter((rect) => rect.width > 0 && rect.height > 0)
+
+      return rects.some((rect) => event.clientX >= rect.left
+        && event.clientX <= rect.right
+        && event.clientY >= rect.top
+        && event.clientY <= rect.bottom)
+    })
+
+  if (!cell) return
+
+  const clickTarget = cell.querySelector<HTMLElement>('.card-frame') ?? cell.querySelector<HTMLElement>('.location') ?? cell
+  event.preventDefault()
+  event.stopPropagation()
+  clickTarget.dispatchEvent(new MouseEvent('click', {
+    bubbles: true,
+    cancelable: true,
+    clientX: event.clientX,
+    clientY: event.clientY,
+    ctrlKey: event.ctrlKey,
+    shiftKey: event.shiftKey,
+    altKey: event.altKey,
+    metaKey: event.metaKey,
+  }))
+}
+
+function onStagePointerDown(event: PointerEvent) {
+  if (event.button !== 0) return
+  const scroller = scrollerRef.value
+  if (!scroller) return
+  const target = event.target as HTMLElement | null
+  if (target?.closest([
+    'button',
+    'a',
+    'input',
+    'select',
+    'textarea',
+    '[role="button"]',
+    '.card',
+    '.card-frame',
+    '.enemy',
+    '.enemy--outer',
+    '.swarm-button-wrap',
+    '.v-popper__popper',
+  ].join(', '))) return
+  if (scroller.scrollWidth <= scroller.clientWidth && scroller.scrollHeight <= scroller.clientHeight) return
+
+  // Do NOT capture the pointer here. Capturing on pointerdown retargets the
+  // browser-synthesized click to the scroller, swallowing clicks on any board
+  // element that hasn't handled the pointerdown itself. We only capture once a
+  // real drag begins (see onStagePointerMove), so a stationary click always
+  // reaches whatever it lands on.
+  stagePan = {
+    pointerId: event.pointerId,
+    startX: event.clientX,
+    startY: event.clientY,
+    scrollLeft: scroller.scrollLeft,
+    scrollTop: scroller.scrollTop,
+    moved: false,
+  }
+}
+
+function onStagePointerMove(event: PointerEvent) {
+  if (!stagePan || stagePan.pointerId !== event.pointerId) return
+  const scroller = scrollerRef.value
+  if (!scroller) return
+  const dx = event.clientX - stagePan.startX
+  const dy = event.clientY - stagePan.startY
+  if (!stagePan.moved && Math.hypot(dx, dy) > DRAG_THRESHOLD_PX) {
+    stagePan.moved = true
+    // Capture now that this is a real drag, so we keep receiving move/up events
+    // even if the pointer leaves the scroller. A click that never dragged is
+    // never captured, so it isn't swallowed.
+    scroller.setPointerCapture(event.pointerId)
+  }
+  if (!stagePan.moved) return
+  event.preventDefault()
+  scroller.scrollLeft = stagePan.scrollLeft - dx
+  scroller.scrollTop = stagePan.scrollTop - dy
+}
+
+function onStagePointerUp(event: PointerEvent) {
+  if (!stagePan || stagePan.pointerId !== event.pointerId) return
+  const scroller = scrollerRef.value
+  if (scroller?.hasPointerCapture(event.pointerId)) scroller.releasePointerCapture(event.pointerId)
+  suppressNextStageClick = stagePan.moved
+  stagePan = null
+}
+
+function onStageClick(event: MouseEvent) {
+  if (!suppressNextStageClick) return
+  suppressNextStageClick = false
+  event.preventDefault()
+  event.stopPropagation()
+}
+
+function updateHiddenLocationActionEdges() {
+  const container = locationCardsContainer.value
+  if (!container) return
+
+  const bounds = container.getBoundingClientRect()
+  const next = { top: false, right: false, bottom: false, left: false }
+  const actionEls = Array.from(
+    container.querySelectorAll<HTMLElement>('.location-cell--can-interact, .can-interact, [class*="--can-interact"]')
+  )
+
+  for (const el of actionEls) {
+    const rect = el.getBoundingClientRect()
+    if (rect.width === 0 || rect.height === 0) continue
+
+    const style = getComputedStyle(el)
+    if (style.visibility === 'hidden' || style.display === 'none') continue
+
+    const isPartiallyVisible =
+      rect.right > bounds.left &&
+      rect.left < bounds.right &&
+      rect.bottom > bounds.top &&
+      rect.top < bounds.bottom
+    if (isPartiallyVisible) continue
+
+    if (rect.right <= bounds.left) next.left = true
+    if (rect.left >= bounds.right) next.right = true
+    if (rect.bottom <= bounds.top) next.top = true
+    if (rect.top >= bounds.bottom) next.bottom = true
+  }
+
+  const current = hiddenLocationActionEdges.value
+  if (
+    current.top !== next.top ||
+    current.right !== next.right ||
+    current.bottom !== next.bottom ||
+    current.left !== next.left
+  ) {
+    hiddenLocationActionEdges.value = next
+  }
+}
+
+function scheduleHiddenLocationActionEdgesUpdate() {
+  if (hiddenLocationActionRaf !== null) cancelAnimationFrame(hiddenLocationActionRaf)
+  hiddenLocationActionRaf = requestAnimationFrame(() => {
+    hiddenLocationActionRaf = null
+    updateHiddenLocationActionEdges()
+  })
+}
+
 // callbacks
 onMounted(() => {
   setGameId(props.game.id)
   window.addEventListener('storage', onCosmicEmissaryStorage)
   window.addEventListener('arkham-setting-change', onCosmicEmissarySettingChange)
+  window.addEventListener('resize', updateRealityAcidLightRect)
+  window.addEventListener('scroll', updateRealityAcidLightRect, true)
+  window.addEventListener('resize', scheduleHiddenLocationActionEdgesUpdate)
+  window.addEventListener('scroll', scheduleHiddenLocationActionEdgesUpdate, true)
+  document.addEventListener('click', proxyClippedLocationClick, true)
+  window.addEventListener('keydown', onFullscreenKeydown)
+  nextTick(updateRealityAcidLightRect)
   updateScrollMargins()
   updateCellDimensions()
   updateLayoutPadding()
+  nextTick(scheduleHiddenLocationActionEdgesUpdate)
+  if (locationCardsContainer.value) {
+    hiddenLocationActionObserver = new MutationObserver(scheduleHiddenLocationActionEdgesUpdate)
+    hiddenLocationActionObserver.observe(locationCardsContainer.value, {
+      attributes: true,
+      attributeFilter: ['class', 'style'],
+      childList: true,
+      subtree: true,
+    })
+
+    hiddenLocationActionResizeObserver = new ResizeObserver(scheduleHiddenLocationActionEdgesUpdate)
+    hiddenLocationActionResizeObserver.observe(locationCardsContainer.value)
+  }
   if(props.scenario.id === "c10651") {
     nextTick(requestCosmicEmissaryCompact)
     setTimeout(requestCosmicEmissaryCompact, 100)
@@ -611,18 +825,33 @@ onMounted(() => {
 onBeforeUnmount(() => {
   window.removeEventListener('storage', onCosmicEmissaryStorage)
   window.removeEventListener('arkham-setting-change', onCosmicEmissarySettingChange)
+  window.removeEventListener('resize', updateRealityAcidLightRect)
+  window.removeEventListener('scroll', updateRealityAcidLightRect, true)
+  window.removeEventListener('resize', scheduleHiddenLocationActionEdgesUpdate)
+  window.removeEventListener('scroll', scheduleHiddenLocationActionEdgesUpdate, true)
+  document.removeEventListener('click', proxyClippedLocationClick, true)
+  window.removeEventListener('keydown', onFullscreenKeydown)
   legObserver?.disconnect()
   legObserver = null
   cosmicEmissaryObserver?.disconnect()
   cosmicEmissaryObserver = null
   cosmicEmissaryResizeObserver?.disconnect()
   cosmicEmissaryResizeObserver = null
+  hiddenLocationActionObserver?.disconnect()
+  hiddenLocationActionObserver = null
+  hiddenLocationActionResizeObserver?.disconnect()
+  hiddenLocationActionResizeObserver = null
+  if (hiddenLocationActionRaf !== null) cancelAnimationFrame(hiddenLocationActionRaf)
+  hiddenLocationActionRaf = null
+  stagePan = null
+  suppressNextStageClick = false
   if (cosmicEmissaryCompactRequest !== null) cancelAnimationFrame(cosmicEmissaryCompactRequest)
   cosmicEmissaryCompactRequest = null
   cancelActiveDrag()
 })
 
 onUpdated(() => {
+  updateRealityAcidLightRect()
   if(props.scenario.id === "c06333") {
     nextTick(() => rotateImages(needsInit.value))
   }
@@ -678,18 +907,50 @@ addEntry({
 })
 
 // Computed
+const pendingScenarioDifficulty = ref<string | null>(null)
+const displayedScenarioDifficulty = computed(() => pendingScenarioDifficulty.value ?? props.scenario.difficulty)
+watch(() => props.scenario.difficulty, (difficulty) => {
+  if (pendingScenarioDifficulty.value === difficulty) pendingScenarioDifficulty.value = null
+})
+
 const scenarioGuide = computed(() => {
-  const { reference, difficulty } = props.scenario
+  const { reference } = props.scenario
+  const difficulty = displayedScenarioDifficulty.value
+  const referenceCode = reference.replace(/^c/, '')
+  const referenceBase = referenceCode.replace(/b$/, '')
+
+  if (props.scenario.id === 'c10501' || referenceBase === '10501' || referenceBase === '10502') {
+    const referenceSide = referenceCode.endsWith('b') ? 'b' : ''
+    const writtenInRockReference = difficulty === 'Hard' || difficulty === 'Expert' ? '10502' : '10501'
+    return cardCodeImage(`${writtenInRockReference}${referenceSide}`)
+  }
+
   const difficultySuffix = difficulty === 'Hard' || difficulty === 'Expert' ? 'b' : ''
   return cardCodeImage(reference, difficultySuffix)
 })
 
+const changeScenarioDifficulty = (event: Event) => {
+  const difficulty = (event.target as HTMLSelectElement).value
+  pendingScenarioDifficulty.value = difficulty
+  debug.send(props.game.id, { tag: 'SetScenarioDifficulty', contents: difficulty })
+}
+
 const additionalReferences = computed(() => {
   return props.scenario.additionalReferences.map((s) => cardCodeImage(s))
 })
+const abyssIsLocation = computed(() =>
+  props.scenario.id === 'c10651' && props.scenario.meta?.abyssIsLocation === true
+)
+
+const abyssDeckCount = computed(() =>
+  props.scenario.decks?.find(([key]) => key === 'AbyssDeck')?.[1]?.length ?? 0
+)
+
 const scenarioDecks = computed(() => {
   if (!props.scenario.decks) return null
-  return Object.entries(props.scenario.decks)
+  return Object.entries(props.scenario.decks).filter(([, scenarioDeck]) =>
+    !(abyssIsLocation.value && scenarioDeck[0] === 'AbyssDeck')
+  )
 })
 
 const hideEncounterDeck = computed(() => props.scenario.id === 'c10651')
@@ -719,7 +980,9 @@ function isAbility(v: Message): v is AbilityLabel {
   }
 
   const { source } = v.ability;
-  return source.sourceTag === 'OtherSource' && source.tag === 'ScenarioSource' 
+  // Ultimatums/Boons are global pseudo-entities with no board presence; their
+  // ability buttons render on the scenario card like scenario abilities do.
+  return source.sourceTag === 'OtherSource' && (source.tag === 'ScenarioSource' || source.tag === 'UltimatumOrBoonSource')
 }
 
 const abilities = computed(() => {
@@ -733,6 +996,112 @@ const abilities = computed(() => {
       return acc;
     }, []);
 })
+
+interface ScenarioBadge {
+  key: string
+  icon: string
+  label: string
+  detail?: string
+}
+
+const scenarioBadges = computed<ScenarioBadge[]>(() => {
+  if (props.scenario.id !== 'c85001') return []
+
+  const badges: ScenarioBadge[] = []
+  if (props.scenario.meta?.foodAndDrinksActive === true) {
+    const damage = typeof props.scenario.meta.foodAndDrinksDamageDealt === 'number' ? props.scenario.meta.foodAndDrinksDamageDealt : 0
+    badges.push({
+      key: 'foodAndDrinks',
+      icon: '🚫🍔',
+      label: 'No food or drinks',
+      detail: `${Math.min(damage, 3)}/3 damage dealt to Subject 8L-08`,
+    })
+  }
+
+  if (props.scenario.meta?.languageActive === true) {
+    badges.push({
+      key: 'language',
+      icon: '🗣️?',
+      label: 'Gibberish only',
+      detail: 'The concept of language is devoured until the end of the investigation phase.',
+    })
+  }
+
+  if (props.scenario.meta?.friendshipsActive === true) {
+    badges.push({
+      key: 'friendships',
+      icon: '🤝⃠',
+      label: 'No cross-commits',
+      detail: 'Friendships are devoured until the end of the round.',
+    })
+  }
+
+  if (props.scenario.meta?.senseOfTimeActive === true) {
+    badges.push({
+      key: 'senseOfTime',
+      icon: '🚫⏱️',
+      label: 'No timekeeping',
+      detail: 'Until the agenda advances, investigators cannot use time-keeping devices, ask about the time, or trigger abilities on cards with “time,” “watch,” or “chrono” in their title.',
+    })
+  }
+
+  if (props.scenario.meta?.discardPileActive === true) {
+    badges.push({
+      key: 'discardPile',
+      icon: '🗑️🫥',
+      label: 'No discard piles',
+      detail: 'Until the end of the next mythos phase, cards that would be placed in an investigator discard pile are devoured instead.',
+    })
+  }
+
+  const voiceActive = props.scenario.meta?.voiceActive
+  if (Array.isArray(voiceActive) && voiceActive.length > 0) {
+    const names = voiceActive.map((iid) => props.game.investigators[iid]?.name?.title).filter(Boolean)
+    badges.push({
+      key: 'voice',
+      icon: '🤐',
+      label: names.length === 1 ? `${names[0]} cannot speak` : 'No speaking/noise',
+      detail: names.length > 0 ? names.join(', ') : 'One or more investigators cannot speak or make noise until the end of the round.',
+    })
+  }
+
+  return badges
+})
+
+const heededDanielsWarning = computed(() =>
+  props.game.campaign?.id === '03' || props.game.campaign?.id === '52'
+    ? props.game.campaign.log.recorded.some((r) => r.tag === 'ThePathToCarcosaKey' && r.contents === 'YouHeadedDanielsWarning')
+    : false
+)
+const hasturSpeaker = computed(() => {
+  const investigators = Object.values(props.game.investigators).filter((i) => !i.eliminated && !i.defeated)
+  return investigators.find((i) => i.playerId === props.playerId) ?? investigators[0] ?? null
+})
+const spokenHasturTooltip = computed(() => {
+  const name = hasturSpeaker.value?.name.title ?? 'an investigator'
+  return `Record that ${name} spoke HASTUR aloud and take 1 horror.`
+})
+
+async function recordSpokenHastur() {
+  const investigatorId = hasturSpeaker.value?.id
+  if (!investigatorId) return
+
+  await updateGameRaw(props.game.id, {
+    tag: 'PlaceTokens',
+    contents: [{ tag: 'CampaignSource' }, { tag: 'InvestigatorTarget', contents: investigatorId }, 'Horror', 1],
+  })
+}
+
+const showScenarioNotifierBar = computed(() => scenarioBadges.value.length > 0 || props.realityAcidLightDevoured === true)
+
+watch(
+  () => [props.realityAcidLightDevoured, props.realityAcidLightActive, scenarioBadges.value.length],
+  () => {
+    nextTick(updateRealityAcidLightRect)
+    setTimeout(updateRealityAcidLightRect, 50)
+  },
+  { immediate: true, flush: 'post' },
+)
 
 const rotationSteps = ref(0)
 const transpose = <T>(grid: T[][]): T[][] =>
@@ -810,14 +1179,17 @@ const gridAreas = computed(()=>{
 // automatically, so we set margins after each render to compensate.
 const locationStyles = computed(() => {
   const pad = layoutPadding.value
+  const mobileEdgePadding = isMobile.value ? 140 : 0
   return {
     display: 'grid',
     gap: '20px',
     'grid-template-areas': gridAreas.value ?? '',
+    gridAutoColumns: 'max-content',
+    gridAutoRows: 'max-content',
     transform: `scale(${locationsZoom.value})`,
     transformOrigin: locationsZoom.value >= 1 ? '0 0' : 'center center',
-    paddingLeft: `${pad.left}px`,
-    paddingRight: `${pad.right}px`,
+    paddingLeft: `${pad.left + mobileEdgePadding}px`,
+    paddingRight: `${pad.right + mobileEdgePadding}px`,
     paddingTop: `${pad.top}px`,
     paddingBottom: `${pad.bottom}px`,
   }
@@ -849,6 +1221,21 @@ const scenarioDeckStyles = computed(() => {
 const players = computed(() => props.game.investigators)
 const playerOrder = computed(() => props.game.playerOrder)
 const discards = computed<Card[]>(() => props.scenario.discard.map(c => ({ tag: 'EncounterCard', contents: c })))
+const playerLocationZones = computed(() => props.game.playerOrder.flatMap((investigatorId) => {
+  const investigator = props.game.investigators[investigatorId]
+  if (!investigator) return []
+
+  const playerLocations = Object.values(props.game.locations).filter((location) =>
+    location.placement?.tag === 'InPlayArea' && location.placement.contents === investigator.id
+  )
+
+  if (playerLocations.length === 0) return []
+  return [{
+    investigatorId,
+    name: fullName(investigator.name),
+    locations: playerLocations,
+  }]
+}))
 
 const enemyGroups = computed(()=>{
   const all = Object.values(props.game.enemies)
@@ -944,13 +1331,13 @@ const hollowed = computed(() => [...new Set(Object.values(props.game.investigato
 const outOfPlay = computed(() => props.scenario?.setAsideCards || [])
 const removedFromPlay = computed(() => props.game.removedFromPlay)
 const noCards = computed<Card[]>(() => [])
-const viewUnderScenarioReference = computed(() => t('cardsUnderneath', cardsUnderScenarioReference.value.length))
 const topOfEncounterDiscard = computed(() => {
   if (!props.scenario.discard[0]) return null
   return cardCodeImage(props.scenario.discard[0].cardCode)
 })
 const spectralEncounterDeck = computed(() => props.scenario.encounterDecks['SpectralEncounterDeck']?.[0])
 const spectralDiscard = computed(() => props.scenario.encounterDecks['SpectralEncounterDeck']?.[1])
+const spectralDiscards = computed<Card[]>(() => (spectralDiscard.value ?? []).map(c => ({ tag: 'EncounterCard', contents: c })))
 const topOfSpectralDiscard = computed(() => {
   if (!spectralDiscard.value || !spectralDiscard.value[0]) return null
   return cardCodeImage(spectralDiscard.value[0].cardCode)
@@ -1000,6 +1387,28 @@ const unusedLabels = computed(() => {
   return locationLayout.flatMap((row) => row.split(' ')).filter((x) => !usedLabels.value.includes(x) && x !== '.')
 })
 const choices = useGameChoices(() => props.game, () => props.playerId)
+watch([choices, locations, locationsZoom], () => nextTick(scheduleHiddenLocationActionEdgesUpdate), { flush: 'post' })
+
+type LocationLike = { id: string, label: string }
+
+const isLocationChoice = (c: Message, location: LocationLike): boolean => {
+  if (c.tag === "TargetLabel") return c.target.contents === location.id
+  if (c.tag === "GridLabel") return c.gridLabel === location.label
+
+  if (c.tag !== "AbilityLabel") return false
+  const { source } = c.ability
+
+  if (source.sourceTag === 'ProxySource') {
+    if ("contents" in source.source) return source.source.contents === location.id
+  } else if (source.tag === 'LocationSource') {
+    return source.contents === location.id
+  }
+
+  return false
+}
+
+const locationCanInteract = (location: LocationLike): boolean =>
+  !locationsUnlocked.value && choices.value.some((choice) => isLocationChoice(choice, location))
 
 const isEncounterDiscardChoice = (c: Message) => {
   if (c.tag !== "TargetLabel") return false
@@ -1026,28 +1435,28 @@ const scraps = computed(() => props.scenario.tokens[TokenType.Scrap])
 const switches = computed(() => props.scenario.tokens[TokenType.Switch])
 const darknessLevel = computed(() => props.scenario.tokens[TokenType.DarknessLevel])
 const signOfTheGods = computed(() => props.scenario.counts["SignOfTheGods"])
+const strengthOfTheAbyss = computed(() => props.scenario.counts["StrengthOfTheAbyss"])
 const distortion = computed(() => props.scenario.counts["Distortion"])
+// Laid to Rest: horror placed on the scenario reference card represents
+// Spiritual Disturbance (defeats everyone at 4). Render it on the scenario card.
+const spiritualDisturbance = computed(() =>
+  props.scenario.id === 'c90054' ? props.scenario.tokens[TokenType.Horror] : undefined)
 const gameOver = computed(() => props.game.gameState.tag === "IsOver")
 
 // Reactive
 const showCards = reactive<RefWrapper<any>>({ ref: noCards })
-const doShowCards = (cards: ComputedRef<Card[]>, title: string, isDiscards: boolean) => {
+const doShowCards = (cards: ComputedRef<Card[]>, title: string, isDiscards: boolean, revealed = false) => {
   cardRowTitle.value = title
   showCards.ref = cards
   viewingDiscard.value = isDiscards
+  revealingCards.value = revealed
 }
 const showRemovedFromPlay = () => doShowCards(removedFromPlay, t('scenario.removedFromPlay'), true)
 const showDiscards = () => doShowCards(discards, t('scenario.discards'), true)
-const showHollowed = () => doShowCards(hollowed, t('scenario.hollowed'), true)
-const handleHollowedChoose = (idx: number) => {
-  if (hollowed.value.length > 1) {
-    showHollowed()
-  } else {
-    choose(idx)
-  }
+const hideCards = () => {
+  showCards.ref = noCards
+  revealingCards.value = false
 }
-const hideCards = () => showCards.ref = noCards
-const showCardsUnderScenarioReference = () => doShowCards(cardsUnderScenarioReference, t('scenario.cardsUnderScenarioReference'), false)
 
 // Watchers
 watchEffect(() => {
@@ -1087,11 +1496,34 @@ watchEffect(() => {
       default: return false
     }
   }
-  const isOutOfPlayChoice = (c: Message) => {
-    if (c.tag !== "AbilityLabel") return false
-    return isOutOfPlaySource(c.ability.source)
+  const isOutOfPlayCardId = (id: string) => outOfPlay.value.some(card => cardId(card) === id)
+
+  const isOutOfPlayTarget = (target: Target) => {
+    const contents = target.contents
+    if (typeof contents !== 'string') return false
+
+    switch (target.tag) {
+      case "CardIdTarget": return isOutOfPlayCardId(contents)
+      case "EnemyTarget": return outOfPlayEnemies.value.some((e) => e.id === contents)
+      case "TreacheryTarget": {
+        return outOfPlayEnemies.value.some((e) => e.treacheries.includes(contents))
+      }
+      case "EventTarget": {
+        return outOfPlayEnemies.value.some((e) => e.events.includes(contents))
+      }
+      default: return false
+    }
   }
-  forcedShowOutOfPlay.value = choices.value.some(isOutOfPlayChoice)
+
+  const isOutOfPlayChoice = (c: Message) => {
+    if (c.tag === "AbilityLabel") return isOutOfPlaySource(c.ability.source)
+    if (c.tag === "TargetLabel") return isOutOfPlayTarget(c.target)
+    return false
+  }
+
+  const isActionableChoice = (c: Message) => !["Info", "InvalidLabel", "TooltipLabel"].includes(c.tag)
+  const actionableChoices = choices.value.filter(isActionableChoice)
+  forcedShowOutOfPlay.value = actionableChoices.length > 0 && actionableChoices.every(isOutOfPlayChoice)
 
   const isHollowedChoice = (c: Message) => {
     if (c.tag !== "TargetLabel") return false
@@ -1104,15 +1536,14 @@ watchEffect(() => {
     encounterDiscardPopoverShown.value = true
     hideCards()
     forcedShowDiscard.value = true
-    forcedShowHollowed.value = false
+    hollowedPopoverShown.value = false
   } else if (showHollowedCards) {
-    showHollowed()
-    forcedShowHollowed.value = true
+    hollowedPopoverShown.value = true
     forcedShowDiscard.value = false
   } else {
     hideCards()
     forcedShowDiscard.value = false
-    forcedShowHollowed.value = false
+    hollowedPopoverShown.value = false
   }
 })
 
@@ -1179,7 +1610,12 @@ function compactCosmicEmissaryFormation(force = false) {
     return el ? [label, el] as const : null
   })
 
-  if (entries.some((entry) => entry === null)) return
+  if (entries.some((entry) => entry === null)) {
+    if (Object.keys(cosmicEmissaryEnemyStyles.value).length > 0 || Object.keys(cosmicEmissaryLocationCellStyles.value).length > 0) {
+      clearCosmicEmissaryCompactStyles()
+    }
+    return
+  }
 
   const elements = Object.fromEntries(entries as [CosmicEmissaryLabel, HTMLElement][]) as Record<CosmicEmissaryLabel, HTMLElement>
 
@@ -1247,7 +1683,7 @@ function compactCosmicEmissaryFormation(force = false) {
       nextEnemyStyles[label] = {
         translate: `${dx}px ${dy}px`,
         transition,
-        zIndex: '20',
+        zIndex: 'var(--z-index-20)',
       }
 
       const locationEl = locationElements[label]
@@ -1269,18 +1705,23 @@ function compactCosmicEmissaryFormation(force = false) {
         nextLocationCellStyles[locationLabel] = {
           translate: `${dx}px ${locationDy}px`,
           transition,
-          zIndex: '10',
+          zIndex: 'var(--z-index-10)',
         }
       }
     }
 
-    if (!styleMapsEqual(cosmicEmissaryEnemyStyles.value, nextEnemyStyles)) {
+    const enemyStylesChanged = !styleMapsEqual(cosmicEmissaryEnemyStyles.value, nextEnemyStyles)
+    const locationCellStylesChanged = !styleMapsEqual(cosmicEmissaryLocationCellStyles.value, nextLocationCellStyles)
+    if (enemyStylesChanged) {
       cosmicEmissaryEnemyStyles.value = nextEnemyStyles
       writeStyleMapCache(cosmicEmissaryEnemyStylesCacheKey, nextEnemyStyles)
     }
-    if (!styleMapsEqual(cosmicEmissaryLocationCellStyles.value, nextLocationCellStyles)) {
+    if (locationCellStylesChanged) {
       cosmicEmissaryLocationCellStyles.value = nextLocationCellStyles
       writeStyleMapCache(cosmicEmissaryLocationCellStylesCacheKey, nextLocationCellStyles)
+    }
+    if (enemyStylesChanged || locationCellStylesChanged) {
+      nextTick(() => window.dispatchEvent(new Event('arkham-location-layout-change')))
     }
     cosmicEmissaryFormationHasMeasured.value = true
   })
@@ -1453,8 +1894,6 @@ const tarotCardAbility = (card: TarotCard) => {
 
 const victoryDisplay = computed(() => props.scenario.victoryDisplay)
 
-const showVictoryDisplay = () => doShowCards(victoryDisplay, t('scenario.victoryDisplay'), true)
-
 const isMinimized_SkillTest = ref(false)
 provide('isMinimized_SkillTest', isMinimized_SkillTest)
 function minimize_SkillTest(isMinimized:boolean){
@@ -1482,7 +1921,7 @@ async function addChaosToken(face: any){
     <UpgradeDeck :game="game" :key="playerId" :playerId="playerId" @choose="choose"/>
   </div>
   <div v-else-if="!gameOver" id="scenario" class="scenario" :data-scenario="scenario.id">
-    <div class="scenario-body" :class="{'split-view': splitView }">
+    <div class="scenario-body" :class="{'split-view': splitView, 'scenario-body--notifier-overlays': showScenarioNotifierBar }">
       <Draggable v-if="showOutOfPlay || forcedShowOutOfPlay">
         <template #handle><header><h2>{{ $t('gameBar.outOfPlay') }}</h2></header></template>
         <div class="card-row-cards">
@@ -1609,10 +2048,11 @@ async function addChaosToken(face: any){
         :isDiscards="viewingDiscard"
         :title="cardRowTitle"
         :playerId="playerId"
+        :revealed="revealingCards"
         @choose="choose"
         @close="hideCards"
       />
-      <div class="scenario-cards">
+      <div class="scenario-cards" :class="{ 'scenario-cards--has-badges': showScenarioNotifierBar }">
         <div v-if="anyInTheShadowLocations || inTheShadows.length > 0 || inTheShadowsInvestigators.length > 0" class="in-the-shadows">
           <template v-if="anyInTheShadowLocations">
             <Location
@@ -1690,7 +2130,7 @@ async function addChaosToken(face: any){
           @choose="choose"
           @show="doShowCards"
         />
-        <VictoryDisplay :game="game" :victoryDisplay="victoryDisplay" @show="showVictoryDisplay" @choose="choose" :playerId="playerId" />
+        <VictoryDisplay :game="game" :victoryDisplay="victoryDisplay" @choose="choose" :playerId="playerId" />
         <div class="scenario-encounter-decks">
           <div v-if="topOfEncounterDiscard" class="discard" style="grid-area: encounterDiscard">
             <div class="discard-card">
@@ -1730,12 +2170,31 @@ async function addChaosToken(face: any){
             v-if="props.scenario.hasEncounterDeck && !hideEncounterDeck"
           />
 
-          <div v-if="topOfSpectralDiscard" class="discard" style="grid-area: spectralDiscard"
-            >
-            <img
-              :src="topOfSpectralDiscard"
-              class="card"
-            />
+          <div v-if="topOfSpectralDiscard" class="discard" style="grid-area: spectralDiscard">
+            <div class="discard-card">
+              <img
+                :src="topOfSpectralDiscard"
+                class="card"
+              />
+              <span class="deck-size">{{ spectralDiscards.length }}</span>
+            </div>
+
+            <div v-if="spectralDiscards.length > 0" class="buttons">
+              <CardsUnderIndicator
+                v-model:shown="spectralDiscardPopoverShown"
+                class="view-discard-button"
+                :cards="spectralDiscards"
+                :game="game"
+                :playerId="playerId"
+                :label="t('scenario.discards')"
+                :isDiscards="true"
+                :fullWidth="true"
+                @choose="choose"
+              />
+              <template v-if="debug.active">
+                <button @click="debug.send(game.id, {tag: 'ShuffleEncounterDiscardBackInByKey', contents: 'SpectralEncounterDeck'})">{{ $t('scenarioComponent.shuffleBackIn') }}</button>
+              </template>
+            </div>
           </div>
 
           <EncounterDeck
@@ -1766,7 +2225,7 @@ async function addChaosToken(face: any){
             />
           </template>
           <div v-else-if="agendaGroupedTreacheries.length > 0" class="treacheries">
-            <div v-for="([cCode, treacheries], idx) in agendaGroupedTreacheries" :key="cCode" class="treachery-group" :style="{ zIndex: (agendaGroupedTreacheries.length - idx) * 10 }">
+            <div v-for="([cCode, treacheries], idx) in agendaGroupedTreacheries" :key="cCode" class="treachery-group" :style="{ zIndex: `calc(var(--z-index-10) * ${agendaGroupedTreacheries.length - idx})` }">
               <div v-for="treacheryId in treacheries" class="treachery-card" :key="treacheryId" >
                 <TreacheryView
                   :treachery="game.treacheries[treacheryId]"
@@ -1832,59 +2291,107 @@ async function addChaosToken(face: any){
         />
 
         <div class="scenario-guide">
-          <div class="scenario-guide-card">
-            <div class="scenario-guide-card">
-              <img
-                class="card"
-                :src="scenarioGuide"
-                :data-spent-keys="JSON.stringify(spentKeys)"
-                :data-depth="currentDepth"
+          <div class="scenario-guide-main">
+            <div class="scenario-guide-card-wrapper">
+              <div class="scenario-guide-card">
+                <img
+                  class="card"
+                  :src="scenarioGuide"
+                  :data-spent-keys="JSON.stringify(spentKeys)"
+                  :data-depth="currentDepth"
+                />
+                <img
+                  v-for="reference in additionalReferences"
+                  class="card"
+                  :src="reference"
+                />
+                <AbilityButton
+                  v-for="ability in abilities"
+                  :key="ability.index"
+                  :ability="ability.contents"
+                  :game="game"
+                  @click="choose(ability.index)"
+                />
+              </div>
+              <PoolItem class="depth" v-if="currentDepth" type="resource" :amount="currentDepth" />
+              <PoolItem class="civilians-slain" v-if="civiliansSlain" type="resource" :amount="civiliansSlain" />
+              <PoolItem class="strength-of-the-abyss" v-if="strengthOfTheAbyss !== undefined" type="resource" :amount="strengthOfTheAbyss" />
+              <PoolItem class="targets" v-if="targets" type="resource" :amount="targets" />
+              <PoolItem class="scraps" v-if="scraps" type="resource" :amount="scraps" />
+              <PoolItem class="switches" v-if="switches" type="resource" :amount="switches" />
+              <PoolItem class="darkness-level" v-if="darknessLevel" type="resource" :amount="darknessLevel" />
+              <div class="spent-keys" v-if="spentKeys.length > 0">
+                <KeyToken v-for="k in spentKeys" :key="keyToId(k)" :keyToken="k" :game="game" :playerId="playerId" @choose="choose" />
+              </div>
+              <PoolItem
+                v-if="signOfTheGods"
+                class="signOfTheGods"
+                type="resource"
+                tooltip="Sign of the Gods"
+                :amount="signOfTheGods"
               />
-              <img
-                v-for="reference in additionalReferences"
-                class="card"
-                :src="reference"
+              <PoolItem
+                v-if="distortion"
+                class="distortion"
+                type="damage"
+                tooltip="Distortion"
+                :amount="distortion"
               />
-              <AbilityButton
-                v-for="ability in abilities"
-                :key="ability.index"
-                :ability="ability.contents"
-                :game="game"
-                @click="choose(ability.index)"
+              <PoolItem
+                v-if="spiritualDisturbance"
+                class="spiritualDisturbance"
+                type="horror"
+                tooltip="Spiritual Disturbance"
+                :amount="spiritualDisturbance"
               />
+              <div class="pool" v-if="hasPool">
+                <PoolItem v-if="resources && resources > 0" type="resource" :amount="resources" />
+                <PoolItem v-if="damage && damage > 0" type="damage" :amount="damage" />
+              </div>
             </div>
-            <PoolItem class="depth" v-if="currentDepth" type="resource" :amount="currentDepth" />
-            <PoolItem class="civilians-slain" v-if="civiliansSlain" type="resource" :amount="civiliansSlain" />
-            <PoolItem class="targets" v-if="targets" type="resource" :amount="targets" />
-            <PoolItem class="scraps" v-if="scraps" type="resource" :amount="scraps" />
-            <PoolItem class="switches" v-if="switches" type="resource" :amount="switches" />
-            <PoolItem class="darkness-level" v-if="darknessLevel" type="resource" :amount="darknessLevel" />
-            <div class="spent-keys" v-if="spentKeys.length > 0">
-              <KeyToken v-for="k in spentKeys" :key="keyToId(k)" :keyToken="k" :game="game" :playerId="playerId" @choose="choose" />
+            <div v-if="heededDanielsWarning" class="spoken-hastur-recorder">
+              <button
+                type="button"
+                class="spoken-hastur-button"
+                :disabled="!hasturSpeaker"
+                v-tooltip="spokenHasturTooltip"
+                :aria-label="spokenHasturTooltip"
+                @click.stop.prevent="recordSpokenHastur"
+              >
+                <img :src="imgsrc('ct_cultist.png')" alt="" />
+              </button>
             </div>
-            <PoolItem
-              v-if="signOfTheGods"
-              class="signOfTheGods"
-              type="resource"
-              tooltip="Sign of the Gods"
-              :amount="signOfTheGods"
-            />
-            <PoolItem
-              v-if="distortion"
-              class="distortion"
-              type="damage"
-              tooltip="Distortion"
-              :amount="distortion"
-            />
-          </div>
-          <div class="pool" v-if="hasPool">
-            <PoolItem v-if="resources && resources > 0" type="resource" :amount="resources" />
-            <PoolItem v-if="damage && damage > 0" type="damage" :amount="damage" />
           </div>
           <div class="keys" v-if="keys.length > 0">
             <KeyToken v-for="k in keys" :key="keyToId(k)" :keyToken="k" :game="game" :playerId="playerId" @choose="choose" />
           </div>
-          <button v-if="cardsUnderScenarioReference.length > 0" class="view-cards-under-button" @click="showCardsUnderScenarioReference">{{viewUnderScenarioReference}}</button>
+          <label v-if="debug.active" class="debug-difficulty">
+            <span>Difficulty</span>
+            <select :value="displayedScenarioDifficulty" @change="changeScenarioDifficulty">
+              <option value="Easy">Easy</option>
+              <option value="Standard">Standard</option>
+              <option value="Hard">Hard</option>
+              <option value="Expert">Expert</option>
+            </select>
+          </label>
+          <button
+            v-if="debug.active && scenarioHasDebugOptions(scenario)"
+            type="button"
+            class="scenario-debug-toggle"
+            @click="showScenarioDebugOptions = true"
+          >
+            Debug
+          </button>
+          <CardsUnderIndicator
+            v-if="cardsUnderScenarioReference.length > 0"
+            class="scenario-cards-under"
+            :cards="cardsUnderScenarioReference"
+            :game="game"
+            :playerId="playerId"
+            :label="$t('scenario.cardsUnderScenarioReference')"
+            full-width
+            @choose="choose"
+          />
         </div>
 
         <div v-if="hollowed.length > 0" class="discard">
@@ -1894,10 +2401,19 @@ async function addChaosToken(face: any){
               :card="hollowed[0]"
               :playerId="playerId"
               class="card"
-              @click="showHollowed"
-              @choose="handleHollowedChoose"
             />
-            <span class="deck-size">{{hollowed.length}}</span>
+          </div>
+          <div class="buttons">
+            <CardsUnderIndicator
+              v-model:shown="hollowedPopoverShown"
+              class="view-discard-button"
+              :cards="hollowed"
+              :game="game"
+              :playerId="playerId"
+              :label="t('scenario.hollowed')"
+              :fullWidth="true"
+              @choose="choose"
+            />
           </div>
         </div>
         <SkillTest
@@ -1910,17 +2426,123 @@ async function addChaosToken(face: any){
         >
         </SkillTest>
 
+        <div v-if="showScenarioNotifierBar" class="scenario-badges" aria-label="Scenario reminders">
+          <div
+            v-for="badge in scenarioBadges"
+            :key="badge.key"
+            class="scenario-badge"
+            v-tooltip="badge.detail"
+            :aria-label="badge.detail ? `${badge.label}: ${badge.detail}` : badge.label"
+          >
+            <span class="scenario-badge-icon" aria-hidden="true">{{ badge.icon }}</span>
+            <span class="scenario-badge-text">
+              <strong>{{ badge.label }}</strong>
+              <small v-if="badge.detail">{{ badge.detail }}</small>
+            </span>
+          </div>
+          <span
+            v-if="realityAcidLightDevoured"
+            ref="realityAcidLightAnchor"
+            class="scenario-badge reality-acid-light-switch-anchor"
+            aria-hidden="true"
+          >
+            <span class="reality-acid-light-switch-track">
+              <span class="reality-acid-light-switch-knob"></span>
+            </span>
+            <span class="scenario-badge-text reality-acid-light-switch-label">
+              <strong>{{ realityAcidLightActive ? 'Lights off' : 'Lights on' }}</strong>
+            </span>
+          </span>
+          <Teleport to="body">
+            <button
+              v-if="realityAcidLightDevoured"
+              type="button"
+              class="scenario-badge reality-acid-light-switch reality-acid-light-switch--floating"
+              :class="{ 'reality-acid-light-switch--on': realityAcidLightActive }"
+              :style="{
+                left: `${realityAcidLightRect.left}px`,
+                top: `${realityAcidLightRect.top}px`,
+                width: `${realityAcidLightRect.width}px`,
+                height: `${realityAcidLightRect.height}px`,
+              }"
+              :title="realityAcidLightActive ? 'Turn the lights back on' : 'Turn the lights off'"
+              @click="$emit('toggleRealityAcidLight')"
+            >
+              <span class="reality-acid-light-switch-track" aria-hidden="true">
+                <span class="reality-acid-light-switch-knob"></span>
+              </span>
+              <span class="scenario-badge-text reality-acid-light-switch-label">
+                <strong>{{ realityAcidLightActive ? 'Lights off' : 'Lights on' }}</strong>
+              </span>
+            </button>
+          </Teleport>
+        </div>
+
       </div>
 
 
-      <div class="location-cards-container" @dblclick.passive="toggleZoom">
+      <div
+        ref="locationCardsContainer"
+        class="location-cards-container"
+        :class="{
+          'location-cards-container--hidden-action': hasHiddenLocationActionEdge,
+          'location-cards-container--hidden-action-top': hiddenLocationActionEdges.top,
+          'location-cards-container--hidden-action-right': hiddenLocationActionEdges.right,
+          'location-cards-container--hidden-action-bottom': hiddenLocationActionEdges.bottom,
+          'location-cards-container--hidden-action-left': hiddenLocationActionEdges.left,
+          'location-cards-container--unlocked': locationsUnlocked,
+          'location-cards-container--fullscreen': locationsFullscreen,
+        }"
+        @dblclick.passive="toggleZoom"
+      >
+        <!-- ponytail: fullscreen mirror of the player-zone zoom-control; duplicated markup
+             beats prop-drilling ~10 handlers into a shared child. Keep the two in sync. -->
+        <div v-if="locationsFullscreen" class="zoom-control zoom-control--fullscreen">
+          <button class="zoom-btn" @pointerdown.stop="startHold(decreaseZoom)" @pointerup="stopHold" @pointerleave="stopHold">−</button>
+          <input v-model.number="locationsZoom" type="range" min="0.25" max="6" step="0.05" class="zoom-slider" />
+          <button class="zoom-btn" @pointerdown.stop="startHold(increaseZoom)" @pointerup="stopHold" @pointerleave="stopHold">+</button>
+          <button
+            class="zoom-btn"
+            :class="{ 'zoom-btn--active': locationsUnlocked }"
+            @click.stop="toggleLocationsUnlocked"
+            v-tooltip="locationsUnlocked ? 'Lock locations' : 'Unlock locations to drag'"
+          >
+            <LockOpenIcon v-if="locationsUnlocked" class="zoom-btn__icon" />
+            <LockClosedIcon v-else class="zoom-btn__icon" />
+          </button>
+          <button
+            v-if="hasAnyOffset"
+            class="zoom-btn"
+            @click.stop="resetLocationsLayout"
+            v-tooltip="'Reset location positions'"
+          >
+            <ArrowUturnLeftIcon class="zoom-btn__icon" />
+          </button>
+          <button
+            class="zoom-btn zoom-btn--active"
+            @click.stop="locationsFullscreen = false"
+            v-tooltip="'Exit fullscreen locations (Esc)'"
+          >
+            <ArrowsPointingInIcon class="zoom-btn__icon" />
+          </button>
+        </div>
+        <div
+          class="location-cards-scroller"
+          ref="scrollerRef"
+          @pointerdown="onStagePointerDown"
+          @pointermove="onStagePointerMove"
+          @pointerup="onStagePointerUp"
+          @pointercancel="onStagePointerUp"
+          @click.capture="onStageClick"
+        >
+        <div class="location-cards-stage">
         <Connections :game="game" :playerId="playerId" :enableCosmicEmissaryAnimation="enableCosmicEmissaryAnimation" />
-        <div class="location-cards-scroller" ref="scrollerRef">
         <transition-group name="map" tag="div" ref="locationMap" class="location-cards" :css="props.scenario.id !== 'c10651'" :style="locationStyles" @before-leave="beforeLeave">
           <div
             v-for="location in locations"
             :key="location.label"
             class="location-cell"
+            :class="{ 'location-cell--can-interact': locationCanInteract(location) }"
             :data-location-id="location.id"
             :data-label="location.label"
             :style="[
@@ -1928,17 +2550,29 @@ async function addChaosToken(face: any){
               cosmicEmissaryLocationCellStyles[location.label] ?? {},
             ]"
           >
-            <Location
-              class="location"
-              :class="{ 'location--unlocked': locationsUnlocked, 'location--dragging': draggingLocationId === location.id }"
-              :game="game"
-              :playerId="playerId"
-              :location="location"
+            <div
+              class="location-wrapper"
               :style="locationOffsetStyle(location)"
               @pointerdown.capture="onLocationPointerDown($event, location)"
-              @choose="choose"
-              @show="doShowCards"
-            />
+              @click.capture="suppressLocationInteractionWhenUnlocked"
+            >
+              <div
+                v-if="abyssIsLocation && location.label === 'theAbyss'"
+                class="abyss-location-count"
+                v-tooltip="`${abyssDeckCount} cards in The Abyss`"
+              >
+                {{ abyssDeckCount }}
+              </div>
+              <Location
+                class="location"
+                :class="{ 'location--unlocked': locationsUnlocked, 'location--dragging': draggingLocationId === location.id }"
+                :game="game"
+                :playerId="playerId"
+                :location="location"
+                @choose="choose"
+                @show="doShowCards"
+              />
+            </div>
           </div>
           <EnemyView
             v-for="enemy in enemiesAsLocations"
@@ -1987,10 +2621,32 @@ async function addChaosToken(face: any){
             </template>
           </template>
         </transition-group>
+        <div v-if="playerLocationZones.length > 0" class="player-location-zones">
+          <section
+            v-for="zone in playerLocationZones"
+            :key="zone.investigatorId"
+            class="player-location-zone"
+          >
+            <h3>{{ zone.name }}</h3>
+            <div class="player-location-zone__cards">
+              <Location
+                v-for="location in zone.locations"
+                :key="location.id"
+                class="player-area-location"
+                :game="game"
+                :playerId="playerId"
+                :location="location"
+                @choose="choose"
+                @show="doShowCards"
+              />
+            </div>
+          </section>
+        </div>
+        </div>
         </div>
       </div>
 
-      <div id="player-zone">
+      <div id="player-zone" :class="{ 'player-zone--fullscreen': locationsFullscreen }">
         <PlayerTabs
           :game="game"
           :playerId="playerId"
@@ -2020,6 +2676,15 @@ async function addChaosToken(face: any){
               v-tooltip="'Reset location positions'"
             >
               <ArrowUturnLeftIcon class="zoom-btn__icon" />
+            </button>
+            <button
+              class="zoom-btn"
+              :class="{ 'zoom-btn--active': locationsFullscreen }"
+              @click.stop="locationsFullscreen = !locationsFullscreen"
+              v-tooltip="locationsFullscreen ? 'Exit fullscreen locations (Esc)' : 'Expand locations to full screen'"
+            >
+              <ArrowsPointingInIcon v-if="locationsFullscreen" class="zoom-btn__icon" />
+              <ArrowsPointingOutIcon v-else class="zoom-btn__icon" />
             </button>
           </div>
         </PlayerTabs>
@@ -2081,6 +2746,15 @@ async function addChaosToken(face: any){
       </div>
     </div>
   </div>
+
+  <Teleport to="body">
+    <ScenarioDebug
+      v-if="debug.active && showScenarioDebugOptions"
+      :game="game"
+      :scenario="scenario"
+      @close="showScenarioDebugOptions = false"
+    />
+  </Teleport>
 </template>
 
 <style scoped>
@@ -2119,7 +2793,11 @@ async function addChaosToken(face: any){
   position: relative;
   width: 100%;
   gap: 10px;
-  z-index: -2;
+  z-index: var(--z-index-neg-2);
+  background: rgba(0, 0, 0, 0.14);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.18);
+
   @media (max-width: 800px) and (orientation: portrait) {
     padding-top: 10px;
     padding-bottom: 0;
@@ -2128,10 +2806,15 @@ async function addChaosToken(face: any){
 }
 
 /* A revealed (slid-out) treachery extends down into the board's region; lift the
-   whole scenario-cards layer above the board (normally z-index: -2, behind it) so
+   whole scenario-cards layer above the board (normally z-index: var(--z-index-neg-2), behind it) so
    the revealed card and its buttons stay clickable. */
 .scenario-cards:has(.treachery-group.is-revealed) {
-  z-index: 1;
+  z-index: var(--z-index-1);
+}
+
+.scenario-cards--has-badges {
+  z-index: calc(var(--z-index-9999) + 2);
+  padding-top: 56px;
 }
 
 .clue {
@@ -2152,13 +2835,13 @@ async function addChaosToken(face: any){
     left: 0;
     right: 0;
     margin: auto;
-    z-index: -1;
+    z-index: var(--z-index-neg-1);
   }
 }
 
 .scenario-body {
   background: var(--background);
-  z-index: 1;
+  z-index: var(--z-index-1);
   width: 100%;
   flex: 1;
   inset: 0;
@@ -2166,6 +2849,10 @@ async function addChaosToken(face: any){
 
   display: grid;
   grid-template-rows: auto 1fr;
+
+  &.scenario-body--notifier-overlays {
+    z-index: auto;
+  }
 
   &.split-view {
     grid-template-columns: 1fr 2fr;
@@ -2175,7 +2862,7 @@ async function addChaosToken(face: any){
 
     &:deep(.player-info) {
       grid-column: 1;
-      grid-row: 2 / 5;
+      grid-row: 2 / 3;
       display: flex;
       flex-direction: column;
 
@@ -2212,7 +2899,7 @@ async function addChaosToken(face: any){
 
     .location-cards-container {
       grid-column: 2;
-      grid-row: 1 / 5;
+      grid-row: 1 / 3;
     }
   }
 }
@@ -2225,28 +2912,175 @@ async function addChaosToken(face: any){
   touch-action: manipulation;
   scrollbar-gutter: stable both-edges;
   scroll-padding: 30%;
+  padding: 24px;
+  box-sizing: border-box;
   display: flex;
+  flex-direction: column;
+  gap: 16px;
   align-items: safe center;
   justify-content: safe center;
 }
 
+.player-location-zones {
+  grid-area: 2 / 1;
+  justify-self: center;
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 12px;
+  flex-shrink: 0;
+  max-width: 100%;
+  padding: 0 12px 12px;
+}
+
+.player-location-zone {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.28);
+
+  h3 {
+    margin: 0;
+    color: white;
+    font-size: 0.85rem;
+    font-weight: 600;
+    text-align: center;
+  }
+}
+
+.player-location-zone__cards {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: flex-start;
+  gap: 12px;
+
+  &:deep(.location) {
+    min-width: calc(var(--card-width) + 120px);
+  }
+}
+
+.location-cards-stage {
+  position: relative;
+  display: grid;
+  row-gap: 16px;
+  flex-shrink: 0;
+  width: max-content;
+  height: max-content;
+  overflow: hidden;
+}
+
 .location-cards {
   display: grid;
-  flex-shrink: 0;
+  grid-area: 1 / 1;
+  justify-self: center;
+  position: relative;
+  z-index: 1;
   transition: transform 0.2s ease;
 }
 
 .location-cards-container {
+  --hidden-location-action-glow: rgba(255, 0, 255, 0.32);
+  --hidden-location-action-soft: rgba(255, 0, 255, 0.12);
+  --hidden-location-action-top: transparent;
+  --hidden-location-action-right: transparent;
+  --hidden-location-action-bottom: transparent;
+  --hidden-location-action-left: transparent;
   display: flex;
   overflow: hidden;
   flex: 1;
-  padding-top: 32px;
   position: relative;
   @media (max-width: 800px) and (orientation: portrait) {
     padding-top: 5px;
     padding-bottom: 5px;
   }
 }
+
+.location-cards-container--fullscreen {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-index-50);
+  background: var(--background);
+}
+
+.zoom-control--fullscreen {
+  position: absolute;
+  top: 45px;
+  right: 10px;
+  z-index: var(--z-index-10, 10);
+  display: flex !important;
+  padding: 4px 6px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.55);
+}
+
+/* Keep the player zone (hand + in-play assets) usable while the board is a
+   fixed fullscreen overlay: pin it to the viewport bottom above the overlay. */
+.player-zone--fullscreen {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: calc(var(--z-index-50) + 1);
+  background: var(--background);
+  box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.5);
+}
+
+.location-cards-container::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: var(--z-index-30);
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  background:
+    linear-gradient(to bottom, var(--hidden-location-action-top), transparent 14px) top / 100% 14px no-repeat,
+    linear-gradient(to left, var(--hidden-location-action-right), transparent 14px) right / 14px 100% no-repeat,
+    linear-gradient(to top, var(--hidden-location-action-bottom), transparent 14px) bottom / 100% 14px no-repeat,
+    linear-gradient(to right, var(--hidden-location-action-left), transparent 14px) left / 14px 100% no-repeat;
+  box-shadow: inset 0 0 6px var(--hidden-location-action-soft);
+}
+
+.location-cards-container--hidden-action::after {
+  opacity: 1;
+
+  @starting-style {
+    opacity: 0;
+  }
+}
+
+.location-cards-scroller {
+  cursor: grab;
+  user-select: none;
+}
+
+.location-cards-scroller:active {
+  cursor: grabbing;
+}
+
+
+.location-cards-container--hidden-action-top {
+  --hidden-location-action-top: var(--hidden-location-action-glow);
+}
+
+.location-cards-container--hidden-action-right {
+  --hidden-location-action-right: var(--hidden-location-action-glow);
+}
+
+.location-cards-container--hidden-action-bottom {
+  --hidden-location-action-bottom: var(--hidden-location-action-glow);
+}
+
+.location-cards-container--hidden-action-left {
+  --hidden-location-action-left: var(--hidden-location-action-glow);
+}
+
 
 .portrait {
   border-radius: 3px;
@@ -2385,8 +3219,8 @@ async function addChaosToken(face: any){
     span {
       position: absolute;
       right: 100%;
-      z-index: 100000;
-      background: #222;
+      z-index: var(--z-index-100000);
+      background: var(--neutral-extra-dark);
       height: 100%;
       display: flex;
       align-items: center;
@@ -2432,37 +3266,213 @@ async function addChaosToken(face: any){
   flex-direction: column;
   position: relative;
   isolation: isolate;
+}
 
-  .depth, .civilians-slain, .targets, .scraps, .switches, .darkness-level {
-    position: absolute;
-    bottom: 0;
-    right: 0;
+.scenario-guide-main {
+  position: relative;
+  width: fit-content;
+}
+
+.scenario-badges {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  z-index: calc(var(--z-index-9999) + 2);
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 6px;
+  min-height: 34px;
+  padding: 5px 10px;
+  overflow: visible;
+  pointer-events: none;
+  background: rgba(0, 0, 0, 0.2);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.scenario-badge {
+  position: relative;
+  display: inline-flex;
+  pointer-events: auto;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  max-width: 260px;
+  border: 1px solid rgb(255 255 255 / 16%);
+  border-left: 3px solid rgb(160 185 190 / 55%);
+  border-radius: 6px;
+  background: rgb(18 21 24 / 92%);
+  color: white;
+  padding: 4px 8px 4px 6px;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 18%);
+}
+
+
+.scenario-badge-icon {
+  flex: 0 0 auto;
+  font-size: 0.95rem;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.scenario-badge-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  line-height: 1.05;
+}
+
+.scenario-badge-text strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.68rem;
+  letter-spacing: 0.01em;
+}
+
+.scenario-badge-text small {
+  overflow: hidden;
+  opacity: 0.68;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.58rem;
+}
+
+.reality-acid-light-switch-anchor {
+  min-width: 136px;
+  visibility: hidden;
+}
+
+.reality-acid-light-switch {
+  z-index: calc(var(--z-index-9999) + 3);
+  isolation: isolate;
+  pointer-events: auto;
+  cursor: pointer;
+  border-color: rgb(255 255 255 / 36%);
+  border-left-color: rgb(255 225 105 / 95%);
+  background: rgb(32 36 42 / 98%);
+  color: #fff;
+  text-shadow: 0 1px 2px rgb(0 0 0 / 90%);
+  box-shadow: 0 2px 8px rgb(0 0 0 / 65%);
+}
+
+.reality-acid-light-switch--on {
+  box-shadow:
+    inset 0 0 12px rgb(255 225 105 / 18%),
+    0 0 0 1px rgb(255 225 105 / 16%),
+    0 0 20px rgb(255 225 105 / 42%),
+    0 2px 8px rgb(0 0 0 / 65%);
+}
+
+.reality-acid-light-switch--floating {
+  position: fixed;
+  z-index: 2147483647;
+  max-width: none;
+}
+
+.reality-acid-light-switch-track {
+  position: relative;
+  flex: 0 0 auto;
+  width: 34px;
+  height: 18px;
+  border-radius: 999px;
+  background: #d6c36a;
+  box-shadow: inset 0 0 0 1px rgb(0 0 0 / 35%);
+}
+
+.reality-acid-light-switch-knob {
+  position: absolute;
+  top: 3px;
+  left: 18px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: white;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 50%);
+  transition: left 120ms ease;
+}
+
+.reality-acid-light-switch--on .reality-acid-light-switch-track {
+  background: #263241;
+}
+
+.reality-acid-light-switch--on .reality-acid-light-switch-knob {
+  left: 4px;
+}
+
+.reality-acid-light-switch .scenario-badge-text strong {
+  color: #fff;
+  font-size: 0.74rem;
+}
+
+.reality-acid-light-switch .scenario-badge-text small {
+  color: #ffe078;
+  opacity: 1;
+}
+
+.reality-acid-light-switch-label {
+  text-align: left;
+}
+
+.scenario-cards-under {
+  align-self: center;
+  margin-top: 2px;
+}
+
+/* A single-cell grid: the card stack and every counter overlay share the same
+   cell, so tokens always land on the card no matter what siblings (pool, keys,
+   cards-underneath button) render around it. */
+.scenario-guide-card-wrapper {
+  display: grid;
+  width: fit-content;
+
+  > * {
+    grid-area: 1 / 1;
+  }
+
+  .depth, .civilians-slain, .targets, .scraps, .switches, .darkness-level, .strength-of-the-abyss {
+    align-self: end;
+    justify-self: end;
     pointer-events: none;
-    z-index: 10;
+    z-index: var(--z-index-10);
   }
 
   .signOfTheGods {
-    z-index: 10;
-    position: absolute;
-    bottom: 0;
-    right: 0;
+    align-self: end;
+    justify-self: end;
     pointer-events: none;
+    z-index: var(--z-index-10);
   }
 
   .distortion {
-    z-index: 10;
-    position: absolute;
-    bottom: 0;
-    right: 0;
+    align-self: end;
+    justify-self: end;
     pointer-events: none;
+    z-index: var(--z-index-10);
+  }
+
+  .spiritualDisturbance {
+    align-self: end;
+    justify-self: end;
+    pointer-events: none;
+    z-index: var(--z-index-10);
   }
 
   .pool {
-    z-index: 10;
-    position: absolute;
-    bottom: 0;
-    right: 0;
+    align-self: end;
+    justify-self: end;
     pointer-events: none;
+    z-index: var(--z-index-10);
+  }
+
+  .spent-keys {
+    align-self: end;
+    justify-self: center;
+    margin-bottom: 20px;
+    pointer-events: none;
+    z-index: var(--z-index-10);
   }
 }
 
@@ -2528,7 +3538,7 @@ async function addChaosToken(face: any){
   background-position: center;
   background-size: contain;
   position: absolute;
-  z-index: 1000;
+  z-index: var(--z-index-1000);
   margin: auto;
   inset: 0;
   width: fit-content;
@@ -2636,7 +3646,7 @@ async function addChaosToken(face: any){
 
 .location {
   &:hover {
-    z-index: 100;
+    z-index: var(--z-index-100);
   }
 }
 
@@ -2646,8 +3656,8 @@ async function addChaosToken(face: any){
   color: #fff;
   cursor: pointer;
   border-radius: 4px;
-  background-color: #555;
-  z-index: 1000;
+  background-color: var(--button);
+  z-index: var(--z-index-1000);
   width: 100%;
   min-width: max-content;
 }
@@ -2662,15 +3672,49 @@ async function addChaosToken(face: any){
   position: relative;
 }
 
+.debug-difficulty {
+  display: flex;
+  flex-direction: column;
+  align-self: center;
+  gap: 2px;
+  margin-top: 2px;
+  width: var(--card-width);
+  color: white;
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.debug-difficulty select {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.65);
+  color: white;
+  font-size: 0.75rem;
+}
+
+.scenario-debug-toggle {
+  align-self: center;
+  width: var(--card-width);
+  margin-top: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 4px;
+  background: var(--button);
+  color: white;
+  cursor: pointer;
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+
 .spent-keys {
   pointer-events: none;
   display: flex;
   flex-direction: row;
   gap: 2px;
-  position: absolute;
-  bottom: 20px;
-  inset-inline: 5px;
-  margin-inline: auto;
 
   &:deep(img) {
     width: 10px;
@@ -2735,11 +3779,52 @@ async function addChaosToken(face: any){
 .location-cell {
   /* Grid placement + TransitionGroup FLIP target. The inner .location carries
      the user's drag offset transform, so rotation reshuffles (which FLIP-
-     animate the wrapper) don't wipe that offset. */
+     animate the wrapper) don't wipe that offset.
+
+     The cell's untransformed grid box can overlap a different translated
+     location. Do not let that invisible/original box win hit-testing; only the
+     translated visible wrapper should receive pointer events. */
   display: block;
+  position: relative;
+  pointer-events: none;
 }
 
-.location-cell > .location {
+.location-cell--can-interact {
+  z-index: var(--z-index-20);
+}
+
+/* While a swarm is fanned open (hovering the swarm, or its abilities menu is open),
+   lift the whole cell above its neighbours so the fanned cards aren't occluded by an
+   adjacent location's wrapper — otherwise sweeping across the fan would lose hover. */
+.location-cell:has(.enemy--outer:hover),
+.location-cell:has(.swarm:hover),
+.location-cell:has(.enemy--swarming.showAbilities) {
+  z-index: var(--z-index-30);
+}
+
+.location-wrapper {
+  width: fit-content;
+  padding-top: 5px;
+}
+
+.abyss-location-count {
+  display: block;
+  width: fit-content;
+  margin: 0 auto 6px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(10, 13, 25, 0.9);
+  border: 1px solid rgba(111, 225, 210, 0.8);
+  box-shadow: 0 0 8px rgba(111, 225, 210, 0.45);
+  color: white;
+  font-size: 0.85rem;
+  font-weight: bold;
+  cursor: help;
+}
+
+.location-cell > .location-wrapper {
+  pointer-events: auto;
+
   /* Animate the offset along with the wrapper's FLIP move during rotation so
      the offset doesn't snap to its rotated value before the wrapper slides
      into place. Same easing/duration as .map-move keeps them in sync. */
@@ -2756,7 +3841,7 @@ async function addChaosToken(face: any){
 
 .location--dragging {
   cursor: grabbing;
-  z-index: 50;
+  z-index: var(--z-index-50);
   transition: none !important;
 }
 
@@ -2863,11 +3948,11 @@ async function addChaosToken(face: any){
   display: flex;
   flex-direction: column;
   img:nth-of-type(1) {
-    z-index: 2;
+    z-index: var(--z-index-2);
   }
 
   img:not(:nth-of-type(1)) {
-    z-index: 1;
+    z-index: var(--z-index-1);
     margin-top: calc((var(--card-width) / (3 / 2)) * -1);
   }
 }
@@ -2898,7 +3983,7 @@ async function addChaosToken(face: any){
 }
 
 .tri-button {
-  background-color: #555;
+  background-color: var(--button);
   color: white;
   padding: 0;
   display: flex;
@@ -2980,6 +4065,42 @@ async function addChaosToken(face: any){
     grid-column-gap: 0;
   }
 }
+
+.spoken-hastur-recorder {
+  position: absolute;
+  top: 4px;
+  right: -42px;
+  z-index: calc(var(--z-index-9999) + 1);
+}
+
+.spoken-hastur-button {
+  position: relative;
+  width: 34px;
+  height: 34px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid rgba(241, 196, 15, 0.45);
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.28);
+  cursor: pointer;
+
+  img {
+    width: 22px;
+    height: 22px;
+    filter: sepia(1) saturate(5) hue-rotate(350deg) brightness(1.15);
+  }
+
+  &:hover {
+    background: rgba(241, 196, 15, 0.16);
+    border-color: rgba(241, 196, 15, 0.75);
+  }
+
+  &:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+}
+
 
 .concealed-card {
   width: calc(var(--card-width) * 0.55);

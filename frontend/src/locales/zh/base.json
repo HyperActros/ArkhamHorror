@@ -36,7 +36,12 @@
     "takeControlOfKey": "获得{key}钥匙的控制权",
     "name": "{name}",
     "giveSeal": "给予封印",
-    "takeSeal": "承受封印"
+    "takeSeal": "承受封印",
+    "takeHorror": "受到{count}点恐惧",
+    "discardTopOfEncounterDeck": "弃掉遭遇牌堆顶的牌 | 弃掉遭遇牌堆顶的{count}张牌",
+    "takeDamageAndHorror": "受到{damage}点伤害和{horror}点恐惧",
+    "loseActions": "失去1个行动 | 失去{count}个行动",
+    "loseResources": "失去1资源 | 失去{count}资源"
   },
   "name": "{name}",
   "shuffleRemainder": "将剩余的遭遇牌混洗，形成遭遇牌库。",
@@ -224,6 +229,7 @@
     "deleteDeck": "删除牌组"
   },
   "deckList": {
+    "newDeck": "新牌组",
     "saveToDeckList": "保存到牌组列表",
     "saveToDeckListDescription": "保留此牌组以供未来的战役使用"
   },
@@ -332,6 +338,7 @@
     "skillValue": "技能值",
     "doubleSuccess": "两次成功效果",
     "doubleDifficulty": "难度翻倍",
+    "automaticallyFailIfSucceedByAtLeast": "如果成功超过 {amount} 或更多，则自动失败",
     "mayIgnoreLocationEffects": "可以忽略地点效果",
     "skillIconsSubtract": "减去技能图标",
     "skillTestAutomaticallySucceeds": "技能检定自动成功",
@@ -390,7 +397,8 @@
   },
   "chooseDeck": {
     "search": "搜索…",
-    "useThisDeck": "使用此牌组"
+    "useThisDeck": "使用此牌组",
+    "randomBasicWeaknessPoolTooltip": "调整随机分配此牌组基础弱点时使用的产品范围。"
   },
   "deckToolbar": {
     "searchDecks": "搜索牌组…",

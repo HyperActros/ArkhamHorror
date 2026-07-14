@@ -23,9 +23,18 @@ export interface ArkhamDBCard {
   real_traits: string
   real_text: string
   type_code: string
+  // "weakness" | "basicweakness"; absent on non-weakness cards
+  subtype_code?: string
   is_unique: boolean
   double_sided: boolean
   encounter_code?: string
+  // Investigator cards only: required signature cards keyed by code, each
+  // mapping to its alternate versions (also keyed by code).
+  deck_requirements?: {
+    size?: number
+    card?: Record<string, Record<string, string> | null>
+    random?: unknown[]
+  }
 }
 
 export interface DbCardsState {
@@ -46,8 +55,7 @@ export const useDbCardStore = defineStore("dbCards", {
   actions: {
     getDbCard(code: string): ArkhamDBCard | null {
       if (this.dbCards.length < 1) {
-        const language = localStorage.getItem('language') || 'en'
-        if (language !== 'en') void this.initDbCards()
+        void this.initDbCards()
       }
 
       return this.dbCardsIndex.get(code) ?? null
@@ -84,14 +92,6 @@ export const useDbCardStore = defineStore("dbCards", {
 
     async initDbCards() {
       const language = localStorage.getItem('language') || 'en'
-
-      if (language === 'en') {
-        this.lang = language
-        this.loadingLang = null
-        this.dbCards = []
-        this.dbCardsIndex = new Map()
-        return
-      }
 
       if (this.lang === language && this.dbCards.length > 0) return
       if (this.loadingLang === language) return

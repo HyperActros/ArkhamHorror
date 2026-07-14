@@ -13,6 +13,8 @@ import Arkham.Classes.Entity
 import Arkham.Classes.HasAbilities
 import Arkham.Classes.HasModifiersFor
 import Arkham.Classes.RunMessage.Internal
+import Arkham.Decklist.RandomBasicWeakness
+import Arkham.Decklist.Type
 import Arkham.Difficulty
 import Arkham.Helpers
 import Arkham.I18n
@@ -31,7 +33,6 @@ import Control.Monad.Writer hiding (filterM)
 import Data.Aeson.TH
 import Data.Aeson.Types (Parser)
 import Data.Data
-import Data.List.NonEmpty qualified as NE
 import Data.Map.Monoidal.Strict (MonoidalMap (..))
 import Data.Map.Strict qualified as Map
 import GHC.Records
@@ -88,6 +89,11 @@ data CampaignAttrs = CampaignAttrs
   , campaignResolutions :: Map ScenarioId Resolution
   , campaignXpBreakdown :: [XpBreakdownStep]
   , campaignModifiers :: Map InvestigatorId [Modifier]
+  , -- | Modifiers that apply to /all/ investigators for the remainder of the
+    -- campaign (current and future). Unlike 'campaignModifiers' these are not
+    -- snapshotted per-investigator; they are expanded onto every investigator
+    -- when modifiers are collected.
+    campaignModifiersForAll :: [ModifierType]
   , campaignMeta :: Value
   , campaignStore :: Map Text Value
   , campaignDestiny :: Map Scope TarotCard
@@ -207,6 +213,9 @@ completeStep step' steps = step' : steps
 modifiersL :: Lens' CampaignAttrs (Map InvestigatorId [Modifier])
 modifiersL = lens campaignModifiers $ \m x -> m {campaignModifiers = x}
 
+modifiersForAllL :: Lens' CampaignAttrs [ModifierType]
+modifiersForAllL = lens campaignModifiersForAll $ \m x -> m {campaignModifiersForAll = x}
+
 instance Entity CampaignAttrs where
   type EntityId CampaignAttrs = CampaignId
   type EntityAttrs CampaignAttrs = CampaignAttrs
@@ -214,27 +223,23 @@ instance Entity CampaignAttrs where
   toAttrs = id
   overAttrs f = f
 
-getRandomBasicWeakness :: MonadRandom m => ClassSymbol -> Int -> m CardDef
-getRandomBasicWeakness investigatorClass playerCount = do
-  let
-    multiplayerFilter =
-      if playerCount < 2
-        then notElem MultiplayerOnly . cdDeckRestrictions
-        else const True
-    notForClass = \case
-      OnlyClass c -> c /= investigatorClass
-      _ -> True
-    classOnlyFilter = not . any notForClass . cdDeckRestrictions
-    weaknessFilter = and . sequence [multiplayerFilter, classOnlyFilter]
-  sample (NE.fromList $ filter weaknessFilter allBasicWeaknesses)
+getRandomBasicWeakness :: MonadRandom m => ClassSymbol -> Int -> Maybe ArkhamDBDecklist -> m CardDef
+getRandomBasicWeakness investigatorClass playerCount mDecklist =
+  sampleRandomBasicWeakness
+    RandomBasicWeaknessContext
+      { rbwInvestigatorClass = investigatorClass
+      , rbwPlayerCount = playerCount
+      , rbwDecklist = mDecklist
+      , rbwStandalone = False
+      }
 
 addRandomBasicWeaknessIfNeeded
-  :: CardGen m => ClassSymbol -> Int -> Deck PlayerCard -> m (Deck PlayerCard, [Card])
-addRandomBasicWeaknessIfNeeded investigatorClass playerCount deck = do
+  :: CardGen m => ClassSymbol -> Int -> Maybe ArkhamDBDecklist -> Deck PlayerCard -> m (Deck PlayerCard, [Card])
+addRandomBasicWeaknessIfNeeded investigatorClass playerCount mDecklist deck = do
   runWriterT do
     Deck <$> flip filterM (unDeck deck) \card -> do
       when (toCardDef card == randomWeakness) do
-        getRandomBasicWeakness investigatorClass playerCount >>= lift . genCard >>= tell . pure
+        getRandomBasicWeakness investigatorClass playerCount mDecklist >>= lift . genCard >>= tell . pure
       pure $ toCardDef card /= randomWeakness
 
 campaignWith
@@ -270,6 +275,7 @@ campaign f campaignId' name difficulty =
       , campaignCompletedSteps = []
       , campaignResolutions = mempty
       , campaignModifiers = mempty
+      , campaignModifiersForAll = mempty
       , campaignMeta = Null
       , campaignStore = mempty
       , campaignXpBreakdown = mempty
@@ -361,6 +367,7 @@ instance FromJSON CampaignAttrs where
       <|> (map toXpBreakdownStep <$> o .:? "xpBreakdown" .!= mempty)
       <|> (o .:? "xpBreakdown" .!= mempty)
     campaignModifiers <- o .: "modifiers"
+    campaignModifiersForAll <- o .:? "modifiersForAll" .!= mempty
     campaignMeta <- o .: "meta"
     campaignStore <- o .:? "store" .!= mempty
     campaignDestiny <- o .:? "destiny" .!= mempty

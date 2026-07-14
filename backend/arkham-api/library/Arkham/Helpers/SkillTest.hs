@@ -371,6 +371,23 @@ inAttackSkillTest = (== Just #fight) <$> getSkillTestAction
 inEvasionSkillTest :: HasGame m => m Bool
 inEvasionSkillTest = (== Just #evade) <$> getSkillTestAction
 
+-- | The 'skillTestResult' stored on the skill test does not include
+-- 'SkillTestResultValueModifier' effects; those are only folded in when the
+-- Pass/Fail messages are emitted (see 'Arkham.SkillTest.Runner'). Cards that
+-- inspect the succeeded/failed-by margin during the resolution window need this
+-- modifier-adjusted value instead of the raw field.
+getSkillTestResultWithResultModifiers :: HasGame m => m (Maybe SkillTestResult)
+getSkillTestResultWithResultModifiers = runMaybeT do
+  st <- MaybeT getSkillTest
+  modifiers' <- lift $ getModifiers (SkillTestTarget st.id)
+  let
+    apply r (SkillTestResultValueModifier n) = case r of
+      SucceededBy b m -> SucceededBy b (max 0 (m + n))
+      FailedBy b m -> FailedBy b (max 0 (m + n))
+      Unrun -> Unrun
+    apply r _ = r
+  pure $ foldl' apply (skillTestResult st) modifiers'
+
 getIsPerilous :: (HasGame m, Tracing m) => SkillTest -> m Bool
 getIsPerilous skillTest = case skillTestSource skillTest of
   TreacherySource tid -> do
@@ -443,15 +460,27 @@ calculateSkillTestResultsData s = do
     modifiedSkillValue' =
       max 0 (currentSkillValue + chaosTokenValues + iconCount - subtractIconCount)
     op = if FailTies `elem` modifiers' then (>) else (>=)
-    isSuccess = modifiedSkillValue' `op` modifiedSkillTestDifficulty
-  pure
-    $ SkillTestResultsData
-      currentSkillValue
-      ((if SkillIconsSubtract `elem` modifiers' then negate . abs else id) iconCount - subtractIconCount)
-      chaosTokenValues
-      modifiedSkillTestDifficulty
-      (resultValueModifiers <$ guard (resultValueModifiers /= 0))
-      isSuccess
+    baseSuccess = modifiedSkillValue' `op` modifiedSkillTestDifficulty
+    succeedByAmount = modifiedSkillValue' - modifiedSkillTestDifficulty
+    autoFailThresholds = [t | AutomaticallyFailIfSucceedByAtLeast t <- modifiers']
+  if any (succeedByAmount >=) autoFailThresholds
+    then autoFailSkillTestResultsData s
+    else
+      pure
+        $ SkillTestResultsData
+          currentSkillValue
+          ((if SkillIconsSubtract `elem` modifiers' then negate . abs else id) iconCount - subtractIconCount)
+          chaosTokenValues
+          modifiedSkillTestDifficulty
+          (resultValueModifiers <$ guard (resultValueModifiers /= 0))
+          baseSuccess
+
+autoFailSkillTestResultsData :: (HasGame m, Tracing m) => SkillTest -> m SkillTestResultsData
+autoFailSkillTestResultsData s = do
+  modifiedSkillTestDifficulty <- getModifiedSkillTestDifficulty s
+  mods <- getModifiers s
+  let x = getSum $ mconcat [Sum n | SkillTestResultValueModifier n <- mods]
+  pure $ SkillTestResultsData 0 0 0 modifiedSkillTestDifficulty (guard (x /= 0) $> x) False
 
 getCurrentSkillValue :: (HasGame m, Tracing m) => SkillTest -> m Int
 getCurrentSkillValue st = do
@@ -629,8 +658,10 @@ getIsCommittable a c = runValidT do
             pure $ x >= n
           CanCommitAfterRevealingTokens -> pure True
         prevented = flip any modifiers' $ \case
+          -- Weaknesses do not interact with the class system (FAQ 1.35)
           CanOnlyUseCardsInRole role ->
-            null $ intersect (cdClassSymbols $ toCardDef card) (setFromList [Mythos, Neutral, role])
+            isNothing (cdCardSubType $ toCardDef card)
+              && null (intersect (cdClassSymbols $ toCardDef card) (setFromList [Mythos, Neutral, role]))
           CannotCommitCards matcher -> cardMatch card matcher
           _ -> False
 

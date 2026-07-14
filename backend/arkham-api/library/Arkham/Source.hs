@@ -6,6 +6,7 @@ module Arkham.Source where
 
 import Arkham.Campaigns.TheScarletKeys.Key.Id (ScarletKeyId)
 import {-# SOURCE #-} Arkham.Card
+import Arkham.Card.CardType (playerCardTypes)
 import {-# SOURCE #-} Arkham.Card.PlayerCard
 import Arkham.ChaosToken.Types
 import Arkham.Id
@@ -21,6 +22,7 @@ import Arkham.Matcher.Types (
 import Arkham.Prelude
 import Arkham.Tarot
 import Arkham.Trait hiding (ElderThing)
+import Arkham.UltimatumsAndBoons.Types
 import Data.Aeson.TH
 import Data.UUID (nil)
 import GHC.OverloadedLabels
@@ -73,6 +75,7 @@ data Source
   | CardCostSource CardId
   | BothSource Source Source
   | TarotSource TarotCard
+  | UltimatumOrBoonSource UltimatumOrBoon
   | BatchSource BatchId
   | ScarletKeySource ScarletKeyId
   | ConcealedCardSource ConcealedCardId
@@ -163,6 +166,7 @@ isProxySource _ _ = False
 isIndexedSource :: Sourceable a => a -> Source -> Bool
 isIndexedSource a (IndexedSource _ source) = isSource a source
 isIndexedSource _ _ = False
+
 proxy :: (Sourceable a, Sourceable b) => a -> b -> Source
 proxy a b = ProxySource (toSource a) (toSource b)
 
@@ -195,15 +199,21 @@ isEncounterCardSource = \case
   ActSource _ -> True
   _ -> False
 
--- | Static check: would this SourceMatcher potentially match a player card source?
--- Used for playability checks where we don't have a specific source but need to know
--- if player card sources are allowed through.
+{- | Static check: would this SourceMatcher potentially match a player card source?
+Used for playability checks where we don't have a specific source but need to know
+if player card sources are allowed through.
+-}
 allowsPlayerCardSource :: SourceMatcher -> Bool
 allowsPlayerCardSource = \case
   SourceIsPlayerCard -> True
   SourceIsPlayerCardAbility -> True
   AnySource -> True
   SourceIsAbility BasicAbility -> True
+  SourceIsAsset _ -> True
+  SourceIsEvent _ -> True
+  SourceWithTrait _ -> True
+  SourceWithCard _ -> True
+  SourceIsType t -> t `elem` playerCardTypes
   SourceMatchesAny ms -> any allowsPlayerCardSource ms
   SourceMatches ms -> all allowsPlayerCardSource ms
   NotSource m -> not (allowsPlayerCardSource m)
@@ -274,6 +284,9 @@ instance Sourceable ActMatcher where
 instance Sourceable LocationMatcher where
   toSource = LocationMatcherSource
 
+instance Sourceable EnemyMatcher where
+  toSource = EnemyMatcherSource
+
 toAbilitySource :: Sourceable a => a -> Int -> Source
 toAbilitySource a n = case toSource a of
   AbilitySource b n' -> AbilitySource b n'
@@ -282,6 +295,7 @@ toAbilitySource a n = case toSource a of
 
 isAbilitySource :: Sourceable a => a -> Int -> Source -> Bool
 isAbilitySource a idx (AbilitySource b idx') | idx == idx' = isSource a b
+isAbilitySource a idx (PaymentSource inner) = isAbilitySource a idx inner
 isAbilitySource a idx (UseAbilitySource _ b idx') | idx == idx' = isSource a b
 isAbilitySource _ _ _ = False
 

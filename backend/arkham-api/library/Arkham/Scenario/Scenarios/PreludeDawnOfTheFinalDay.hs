@@ -7,14 +7,14 @@ import Arkham.Calculation
 import Arkham.Campaigns.TheFeastOfHemlockVale.CampaignSteps hiding (PreludeDawnOfTheFinalDay)
 import Arkham.Campaigns.TheFeastOfHemlockVale.Helpers
 import Arkham.Campaigns.TheFeastOfHemlockVale.Key
+import Arkham.Campaigns.TheFeastOfHemlockVale.TokenHelpers
 import Arkham.Classes.HasQueue (clearQueue)
 import Arkham.EncounterSet qualified as Set
 import Arkham.Enemy.Cards qualified as Enemies
 import Arkham.Helpers.Cost (getSpendableResources)
 import Arkham.Helpers.FlavorText
-import Arkham.Helpers.Investigator (getHandSize, getStartingResources)
 import Arkham.Helpers.Log (getRecordCount)
-import Arkham.Helpers.Message.Discard.Lifted (chooseAndDiscardCards, randomDiscard)
+import Arkham.Helpers.Message.Discard.Lifted (randomDiscard)
 import Arkham.Helpers.Query (getInvestigators, getJustLocationByName, getLead, getPlayerCount)
 import Arkham.I18n
 import Arkham.Id (InvestigatorId, PlayerId, getPlayer)
@@ -25,7 +25,6 @@ import Arkham.Message (pattern PassedThisSkillTest)
 import Arkham.Message qualified as Msg
 import Arkham.Message.Lifted.Choose
 import Arkham.Message.Lifted.Log (incrementRecordCount, record, remember, remembered)
-import Arkham.Modifier
 import Arkham.Placement
 import Arkham.Projection
 import Arkham.Resolution
@@ -54,14 +53,11 @@ preludeDawnOfTheFinalDay difficulty =
     ]
     $ (hasEncounterDeckL .~ False)
     . (referenceL .~ "10704")
+    . (isPreludeL .~ True)
 
 instance HasChaosTokenValue PreludeDawnOfTheFinalDay where
-  getChaosTokenValue iid tokenFace (PreludeDawnOfTheFinalDay attrs) = case tokenFace of
-    Skull -> pure $ toChaosTokenValue attrs Skull 3 5
-    Cultist -> pure $ ChaosTokenValue Cultist NoModifier
-    Tablet -> pure $ ChaosTokenValue Tablet NoModifier
-    ElderThing -> pure $ ChaosTokenValue ElderThing NoModifier
-    otherFace -> getChaosTokenValue iid otherFace attrs
+  getChaosTokenValue iid tokenFace (PreludeDawnOfTheFinalDay attrs) =
+    hemlockPreludeChaosTokenValue iid tokenFace attrs
 
 instance RunMessage PreludeDawnOfTheFinalDay where
   runMessage msg s@(PreludeDawnOfTheFinalDay attrs) = runQueueT $ campaignI18n $ scope "prelude3" $ case msg of
@@ -102,6 +98,9 @@ instance RunMessage PreludeDawnOfTheFinalDay where
       for_ halfXp \(pid, n) -> when (n > 0) do
         selectOne (InvestigatorIsPlayer pid) >>= traverse_ \iid ->
           gainXp iid ScenarioSource (ikey "xp.survivor") n
+      pure s
+    ResolveChaosToken token face iid | face `elem` [Cultist, ElderThing] -> do
+      hemlockPreludeResolveChaosToken attrs token face iid
       pure s
     Setup -> runScenarioSetup PreludeDawnOfTheFinalDay attrs do
       setup $ ul do
@@ -189,14 +188,15 @@ instance RunMessage PreludeDawnOfTheFinalDay where
       -- Hiding fireworks (Codex 10/14/15): test Combat or Agility at the given
       -- difficulty. Each success marks 1 tally next to "The plan is underway"
       -- (handled in PassedThisSkillTest below).
-      let hideFireworks skills x = do
+      let hideFireworks idx skills x = do
             sid <- getRandom
-            chooseBeginSkillTest sid iid attrs attrs skills (Fixed x)
+            chooseBeginSkillTest sid iid (IndexedSource idx $ toSource attrs) attrs skills (Fixed x)
       let drawOrResource = chooseOneM iid do
             labeled' "draw" $ drawCards iid source 1
             labeled' "gainResource" $ gainResources iid source 1
       case n of
         1 -> scope "motherRachel" do
+          codexFinished 1
           southernFields <- getHasRecord (AreasSurveyed SouthernFields)
           flavor do
             setTitle "title"
@@ -211,12 +211,13 @@ instance RunMessage PreludeDawnOfTheFinalDay where
                 flavor $ setTitle "title" >> p.green "motherRachel3"
                 record TheInvestigatorsLearnedTheirPlace
                 increaseRelationshipLevel MotherRachel 1
-                eachInvestigator \i -> gainXp i attrs (ikey "xp.motherRachel") 1
+                popScope $ eachInvestigator \i -> gainXp i attrs (ikey "xp.motherRachel") 1
               labeled' "iSeeYou" do
                 flavor $ setTitle "title" >> p.green "motherRachel4"
                 decreaseRelationshipLevel MotherRachel 1
-                eachInvestigator \i -> gainXp i attrs (ikey "xp.motherRachel") 1
+                popScope $ eachInvestigator \i -> gainXp i attrs (ikey "xp.motherRachel") 1
         2 -> scope "leahAtwood" do
+          codexFinished 2
           simeonCrossedOut <- getHasRecord SimeonCrossedOut
           flavor do
             setTitle "title"
@@ -226,8 +227,9 @@ instance RunMessage PreludeDawnOfTheFinalDay where
               p.validate (not simeonCrossedOut) "notCrossedOut"
           let x = if simeonCrossedOut then 1 else 2
           increaseRelationshipLevel LeahAtwood x
-          eachInvestigator \i -> gainXp i attrs (ikey "xp.leahAtwood") n
+          popScope $ eachInvestigator \i -> gainXp i attrs (ikey "xp.leahAtwood") x
         4 -> scope "williamHemlock" do
+          codexFinished 4
           stood <- getHasRecord WilliamStoodByYou
           flavor do
             setTitle "title"
@@ -247,8 +249,9 @@ instance RunMessage PreludeDawnOfTheFinalDay where
               when tookHeart $ record WilliamIsResolved
             else flavor $ setTitle "title" >> p.green "william3"
           increaseRelationshipLevel WilliamHemlock 1
-          eachInvestigator \i -> gainXp i attrs (ikey "xp.williamHemlock") 1
+          popScope $ eachInvestigator \i -> gainXp i attrs (ikey "xp.williamHemlock") 1
         5 -> scope "riverHawthorne" do
+          codexFinished 5
           stood <- getHasRecord RiverStoodByYou
           scheme <- getHasRecord TheSchemeIsInMotion
           flavor do
@@ -261,10 +264,11 @@ instance RunMessage PreludeDawnOfTheFinalDay where
             then do
               record RiverIsReclaimingTheirLegacy
               increaseRelationshipLevel RiverHawthorne 1
-              eachInvestigator \i -> gainXp i attrs (ikey "xp.riverHawthorne") 1
+              popScope $ eachInvestigator \i -> gainXp i attrs (ikey "xp.riverHawthorne") 1
             else do
               gainResources iid source 3
         6 -> scope "gideonMizrah" do
+          codexFinished 6
           stood <- getHasRecord GideonStoodByYou
           flavor do
             setTitle "title"
@@ -275,10 +279,11 @@ instance RunMessage PreludeDawnOfTheFinalDay where
           if stood
             then do
               increaseRelationshipLevel GideonMizrah 1
-              eachInvestigator \i -> gainXp i attrs (ikey "xp.gideonMizrah") 1
+              popScope $ eachInvestigator \i -> gainXp i attrs (ikey "xp.gideonMizrah") 1
             else do
               drawCards iid source 3
         7 -> scope "judithPark" do
+          codexFinished 7
           theCrossroads <- getJustLocationByName "The Crossroads"
           createEnemyAt_ Enemies.miasmaticShadow theCrossroads
           stood <- getHasRecord JudithStoodByYou
@@ -301,8 +306,9 @@ instance RunMessage PreludeDawnOfTheFinalDay where
               flavor $ setTitle "title" >> p.green "judith3"
               randomDiscard iid source
           increaseRelationshipLevel JudithPark 1
-          eachInvestigator \i -> gainXp i attrs (ikey "xp.judithPark") 1
+          popScope $ eachInvestigator \i -> gainXp i attrs (ikey "xp.judithPark") 1
         8 -> scope "theoPeters" do
+          codexFinished 8
           stood <- getHasRecord TheoStoodByYou
           flavor do
             setTitle "title"
@@ -314,7 +320,7 @@ instance RunMessage PreludeDawnOfTheFinalDay where
             then do
               record TheoIsHavingSecondThoughts
               increaseRelationshipLevel TheoPeters 1
-              eachInvestigator \i -> gainXp i attrs (ikey "xp.theoPeters") 1
+              popScope $ eachInvestigator \i -> gainXp i attrs (ikey "xp.theoPeters") 1
             else do
               remember YouAreDeliveringAPackage
         9 -> do
@@ -339,8 +345,10 @@ instance RunMessage PreludeDawnOfTheFinalDay where
               hr
               p.validate (not planUnderway) "otherwise"
           if planUnderway
-            then hideFireworks [#willpower, #combat] 3
-            else drawOrResource
+            then hideFireworks 10 [#willpower, #combat] 3
+            else do
+              codexFinished 10
+              drawOrResource
         11 -> scope "hemlockChapel" do
           planUnderway <- getHasRecord ThePlanIsUnderway
           gideonSetAside <- selectAny $ SetAsideCardMatch $ cardIs Assets.gideonMizrahSeasonedSailor
@@ -354,8 +362,11 @@ instance RunMessage PreludeDawnOfTheFinalDay where
           when gideonSetAside do
             hemlockChapel <- getJustLocationByName "Hemlock Chapel"
             createAssetAt_ Assets.gideonMizrahSeasonedSailor (AtLocation hemlockChapel)
-          when planUnderway $ hideFireworks [#agility] 2
+          if planUnderway 
+            then hideFireworks 11 [#agility] 2
+            else codexFinished 11
         13 -> scope "theAtwoodHouse" do
+          codexFinished 13
           flavor $ setTitle "title" >> p.green "body"
           leahSetAside <- selectAny $ SetAsideCardMatch $ cardIs Assets.leahAtwoodTheValeCook
           when leahSetAside do
@@ -370,8 +381,9 @@ instance RunMessage PreludeDawnOfTheFinalDay where
               hr
               p.validate (not planUnderway) "otherwise"
           if planUnderway
-            then hideFireworks [#intellect, #agility] 3
+            then hideFireworks 14 [#intellect, #agility] 3
             else do
+              codexFinished 14
               resources <- getSpendableResources iid
               when (resources >= 5) do
                 chooseOneM iid do
@@ -388,9 +400,12 @@ instance RunMessage PreludeDawnOfTheFinalDay where
               hr
               p.validate (not planUnderway) "otherwise"
           if planUnderway
-            then hideFireworks [#combat, #agility] 3
-            else drawOrResource
+            then hideFireworks 15 [#combat, #agility] 3
+            else do
+              codexFinished 15
+              drawOrResource
         16 -> scope "theCommons" do
+          codexFinished 16
           delivering <- remembered YouAreDeliveringAPackage
           flavor do
             setTitle "title"
@@ -400,7 +415,7 @@ instance RunMessage PreludeDawnOfTheFinalDay where
               p "regardless"
           when delivering do
             increaseRelationshipLevel TheoPeters 1
-            eachInvestigator \i -> gainXp i attrs (ikey "xp.theoPeters") 1
+            popScope $ eachInvestigator \i -> gainXp i attrs (ikey "xp.theoPeters") 1
           iids <- getInvestigators
           residents <- filterM (fmap (<= 2) . getRelationshipLevel) [WilliamHemlock ..]
           chooseOrRunOneM iid do
@@ -421,12 +436,13 @@ instance RunMessage PreludeDawnOfTheFinalDay where
                           for_ residents \resident -> do
                             cardLabeled resident do
                               increaseRelationshipLevel resident 1
-                              eachInvestigator \iid'' -> gainXp iid'' attrs (ikey "xp.theCommons") 1
+                              popScope $ eachInvestigator \iid'' -> gainXp iid'' attrs (ikey "xp.theCommons") 1
         _ -> error "invalid codex entry"
       pure s
-    PassedThisSkillTest _iid (isSource attrs -> True) -> scope "codex" do
+    PassedThisSkillTest _iid (IndexedSource n (isSource attrs -> True)) -> scope "codex" do
       -- A successfully hidden cluster of fireworks: mark 1 tally next to "The
       -- plan is underway" in Simeon Atwood's Notes.
+      codexFinished n
       flavor $ p.green "fireworksHidden"
       incrementRecordCount ThePlanIsUnderway 1
       pure s
@@ -450,20 +466,7 @@ instance RunMessage PreludeDawnOfTheFinalDay where
           when (fireworks >= n) $ record TheValeIsFullOfFireworks
           -- Make preparations for the final survey: keep one non-starting asset,
           -- discard the rest, trim to opening hand size and starting resources.
-          eachInvestigator \iid -> do
-            assets <- select $ assetControlledBy iid
-            chooseOrRunOneM iid do
-              for_ (eachWithRest assets) \(asset, rest) ->
-                targeting asset do
-                  setupModifier ScenarioSource asset Persist
-                  for_ rest $ toDiscard ScenarioSource
-            handSize <- getHandSize iid
-            cs <- fieldMap InvestigatorHand length iid
-            when (cs > handSize) $ chooseAndDiscardCards iid ScenarioSource (cs - handSize)
-            shuffleDiscardBackIn iid
-            rs <- getStartingResources iid
-            resources <- field InvestigatorResources iid
-            when (resources > rs) $ loseResources iid ScenarioSource (resources - rs)
+          eachInvestigator makePreparationsForNextSurvey
           keepCardCache
           endOfScenario
         _ -> error "invalid resolution"

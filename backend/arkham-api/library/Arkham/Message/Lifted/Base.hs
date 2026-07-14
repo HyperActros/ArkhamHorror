@@ -1,8 +1,6 @@
 {-# OPTIONS_GHC -Wno-unused-imports -Wno-orphans #-}
 
-
 module Arkham.Message.Lifted.Base where
-
 
 import Arkham.Helpers.FetchCard as X
 
@@ -197,6 +195,10 @@ setupModifier
   :: (ReverseQueue m, Sourceable source, Targetable target) => source -> target -> ModifierType -> m ()
 setupModifier source target modifier = Msg.pushM $ Msg.setupModifier source target modifier
 
+nextScenarioModifier
+  :: (ReverseQueue m, Sourceable source, Targetable target) => source -> target -> ModifierType -> m ()
+nextScenarioModifier = setupModifier
+
 shuffleCardsIntoDeck
   :: ( ReverseQueue m
      , IsDeck deck
@@ -209,6 +211,7 @@ shuffleCardsIntoDeck
   -> cards
   -> m ()
 shuffleCardsIntoDeck deck cards = whenCanShuffleIn deck cards do
+  for_ cards $ push . ObtainCard . toCardId
   push $ Msg.shuffleCardsIntoDeck deck cards
 
 chooseAndDiscardAssetMatching

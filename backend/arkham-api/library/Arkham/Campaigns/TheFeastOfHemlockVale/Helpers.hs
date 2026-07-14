@@ -4,43 +4,103 @@
 module Arkham.Campaigns.TheFeastOfHemlockVale.Helpers where
 
 import Arkham.Asset.Cards qualified as Assets
-import Arkham.Campaign.Types (Field (..))
+import Arkham.Asset.Types qualified as Asset
+import Arkham.Campaign.Types (Field (CampaignChaosBag))
 import Arkham.CampaignLogKey
 import Arkham.CampaignStep
 import Arkham.Campaigns.TheFeastOfHemlockVale.Key
-import Arkham.Card.CardCode
-import Arkham.Card.CardDef
+import Arkham.Card
 import Arkham.ChaosToken.Types (ChaosTokenFace (..), isSymbolChaosToken)
 import Arkham.Classes.HasGame
 import Arkham.Classes.HasQueue (push)
+import Arkham.Classes.Query
 import Arkham.Criteria
+import Arkham.EncounterSet qualified as Set
 import Arkham.Enemy.Types.Attrs
 import Arkham.Helpers.Campaign
 import Arkham.Helpers.FlavorText (chaosTokenMorph, p, setTitle, storyBuild)
+import Arkham.Helpers.Investigator (getStartingHandSize, getStartingResources)
 import Arkham.Helpers.Log
+import Arkham.Helpers.Message.Discard.Lifted (chooseAndDiscardCards)
 import Arkham.Helpers.Modifiers (getModifiers)
 import Arkham.I18n
 import Arkham.Id
+import Arkham.Investigator.Types qualified as Investigator
 import Arkham.Location.Base
-import Arkham.Matcher.Enemy
-import Arkham.Matcher.Investigator
-import Arkham.Matcher.Scenario
+import Arkham.Matcher
 import Arkham.Message (Message (NextCampaignStep), pattern SetCampaignChaosBag)
 import Arkham.Message.Lifted hiding (continue)
+import Arkham.Message.Lifted.Choose
 import Arkham.Message.Lifted.Log (decrementRecordCount, incrementRecordCount, recordCount)
 import Arkham.Modifier
 import Arkham.Prelude hiding (Day)
+import Arkham.Projection
+import Arkham.Scenario.Import.Lifted (gather, placeStory)
 import Arkham.Scenario.Options
+import Arkham.Scenario.Setup (ScenarioBuilderT)
 import Arkham.Source
+import Arkham.Story.Cards qualified as Stories
 import Arkham.Target
 import Arkham.Tracing
+import Arkham.Trait (Trait (Dark))
 import Data.Monoid (First (..))
 
 campaignI18n :: (HasI18n => a) -> a
 campaignI18n a = withI18n $ scope "theFeastOfHemlockVale" a
 
 codex :: (ReverseQueue m, Sourceable source) => InvestigatorId -> source -> Int -> m ()
-codex iid (toSource -> source) n = scenarioSpecific "codex" (iid, source, n)
+codex iid (toSource -> source) n = do
+  cannotTriggerCodex <- elem (ScenarioModifier "cannotTriggerCodex") <$> getModifiers ScenarioTarget
+  unless cannotTriggerCodex $ scenarioSpecific "codex" (iid, source, n)
+
+type Codex = Int
+
+youCanTriggerCodex :: Codex -> Criterion
+youCanTriggerCodex entry =
+  youExist
+    ( InvestigatorWithoutModifier (codexDone entry)
+        <> InvestigatorWithoutModifier (ScenarioModifier "cannotTriggerCodex")
+    )
+
+codexDone :: Codex -> ModifierType
+codexDone entry = ScenarioModifierValue "codex:done" (toJSON entry)
+
+codexFinished :: ReverseQueue m => Codex -> m ()
+codexFinished entry = eachInvestigator (codexFinishedFor entry)
+
+codexFinishedUntilNewAct :: ReverseQueue m => Codex -> m ()
+codexFinishedUntilNewAct entry = eachInvestigator \iid ->
+  actModifier ScenarioSource iid $ codexDone entry
+
+codexFinishedFor :: ReverseQueue m => Codex -> InvestigatorId -> m ()
+codexFinishedFor entry iid = gameModifier ScenarioSource iid (ScenarioModifierValue "codex:done" (toJSON entry))
+
+makePreparationsForNextSurvey :: ReverseQueue m => InvestigatorId -> m ()
+makePreparationsForNextSurvey iid = do
+  iattrs <- getAttrs @Investigator.Investigator iid
+  let startingAssetCodes = map toCardCode iattrs.investigatorStartsWith
+  permanentAssets <- select $ assetControlledBy iid <> PermanentAsset
+  assets <- selectWithField Asset.AssetCardCode $ assetControlledBy iid
+  let isPersistent (aid, code) = code `elem` startingAssetCodes || aid `elem` permanentAssets
+  let (persistAssets, otherAssets) = partition isPersistent assets
+
+  for_ persistAssets \(asset, _) -> setupModifier ScenarioSource asset Persist
+  unless (null otherAssets) $ campaignI18n $ chooseOrRunOneM iid do
+    questionLabeled' "chooseAssetToKeepForNextSurvey"
+    for_ (eachWithRest (map fst otherAssets)) \(asset, rest) ->
+      targeting asset do
+        setupModifier ScenarioSource asset Persist
+        for_ rest $ toDiscard ScenarioSource
+
+  openingHandSize <- getStartingHandSize iid
+  cardsInHand <- fieldMap Investigator.InvestigatorHand length iid
+  when (cardsInHand > openingHandSize)
+    $ chooseAndDiscardCards iid ScenarioSource (cardsInHand - openingHandSize)
+  shuffleDiscardBackIn iid
+  startingResources <- getStartingResources iid
+  resources <- field Investigator.InvestigatorResources iid
+  when (resources > startingResources)
+    $ loseResources iid ScenarioSource (resources - startingResources)
 
 data Day = Day1 | Day2 | Day3
   deriving stock (Show, Eq, Generic)
@@ -55,6 +115,24 @@ dayNumber = \case
 data Time = Night | Day
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON)
+
+setupHemlockDay :: ReverseQueue m => Day -> Time -> ScenarioBuilderT m ()
+setupHemlockDay day time = case day of
+  Day1 -> do
+    gather Set.TheFirstDay
+    placeStory $ case time of
+      Day -> Stories.dayOne
+      Night -> Stories.nightOne
+  Day2 -> do
+    gather Set.TheSecondDay
+    placeStory $ case time of
+      Day -> Stories.dayTwo
+      Night -> Stories.nightTwo
+  Day3 -> do
+    gather Set.TheFinalDay
+    placeStory $ case time of
+      Day -> Stories.dayThree
+      Night -> Stories.nightThree
 
 initMeta :: TheFeastOfHemlockValeMeta
 initMeta = TheFeastOfHemlockValeMeta Day1 Day []
@@ -92,20 +170,36 @@ class HasTimeOverride a where
   isLight :: a -> Criterion
   isLight = not_ . isDark
 
+{- | The Lost Sister has no global day/night. Instead it is Day for everything
+(locations, enemies, treacheries, investigators) unless the relevant location
+has the Dark trait, in which case it is Night there. Every other scenario sets
+a single global "time" modifier, so we fall back to that when not in The Lost
+Sister.
+-}
+inLostSister :: Criterion -> Criterion -> Criterion
+inLostSister = IfCriteria (ScenarioExists $ ScenarioWithId "10569")
+
 instance HasTimeOverride EnemyAttrs where
-  isDark a = thisExists a (EnemyWithModifier $ ScenarioModifierValue "time" (String "Night"))
+  isDark a =
+    inLostSister
+      (thisExists a (EnemyWithModifier $ ScenarioModifierValue "time" (String "Night")))
+      IsNight_
 
 instance HasTimeOverride LocationAttrs where
-  isDark _ = IsNight_
+  isDark a = inLostSister (thisExists a $ LocationWithTrait Dark) IsNight_
+  isLight a = inLostSister (thisExists a $ not_ $ LocationWithTrait Dark) IsDay_
 
 instance HasTimeOverride InvestigatorMatcher where
-  isDark a = exists $ a <> InvestigatorWithModifier (ScenarioModifierValue "time" (String "Night"))
+  isDark a =
+    inLostSister
+      (exists $ a <> InvestigatorWithModifier (ScenarioModifierValue "time" (String "Night")))
+      IsNight_
 
 isDayFor :: HasTimeOverride a => a -> Criterion
-isDayFor a = not_ (isDark a) <> IsDay_
+isDayFor a = isLight a
 
 isNightFor :: HasTimeOverride a => a -> Criterion
-isNightFor a = not_ (isLight a) <> IsNight_
+isNightFor a = isDark a
 
 pattern IsDay_ :: Criterion
 pattern IsDay_ <- ScenarioExists (ScenarioWithModifier (ScenarioModifierValue "time" (String "Day")))
@@ -143,7 +237,12 @@ afterPrelude :: ReverseQueue m => CampaignStep -> m ()
 afterPrelude =
   setNextCampaignStep . \case
     ScenarioStep sid ->
-      ScenarioStepWithOptions sid defaultScenarioOptions {scenarioOptionsSkipInvestigatorSetup = True}
+      ScenarioStepWithOptions
+        sid
+        defaultScenarioOptions
+          { scenarioOptionsSkipInvestigatorSetup = True
+          , scenarioOptionsSkipStartOfGame = True
+          }
     other -> other
  where
   setNextCampaignStep = push . NextCampaignStep . continueNoUpgrade

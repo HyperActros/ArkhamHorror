@@ -41,6 +41,7 @@ logfile
 # Large image assets (served from CloudFront CDN in both dev and prod)
 # Run `make fetch-images` to download locally if needed
 frontend/public/img/arkham/cards/
+frontend/public/img/arkham/homebrew/*/cards/
 frontend/public/img/arkham/es/
 frontend/public/img/arkham/fr/
 frontend/public/img/arkham/ita/
@@ -87,3 +88,19 @@ kubeconfig*
 .claude/
 CLAUDE.md
 .mcp.json
+AGENTS.md
+tmp/
+.buildx-cache/
+.agents/
+.windsurf/
+skills-lock.json
+
+# ML pipeline artifacts (training data, trained-model output, venv)
+/data/
+ml/.venv/
+ml/__pycache__/
+ml/model/
+*.pyc
+
+docs/homebrew
+docs/homebrew.md

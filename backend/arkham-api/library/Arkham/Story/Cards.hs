@@ -4,9 +4,13 @@ import Arkham.Card.CardCode
 import Arkham.Card.CardDef
 import Arkham.Card.CardType
 import Arkham.EncounterSet
+import Arkham.LocationSymbol qualified as LS
 import Arkham.Name
 import Arkham.Prelude
 import Arkham.Trait
+
+withScanIcons :: [LS.LocationSymbol] -> CardDef -> CardDef
+withScanIcons icons def = def {cdMeta = insertMap "scanIcons" (toJSON icons) def.meta}
 
 addTrait :: Trait -> CardDef -> CardDef
 addTrait trait def =
@@ -63,12 +67,8 @@ allStoryCards =
       , theArchway
       , theHeightOfTheDepths
       , stepsOfThePalace
-      , theDelusion
-      , theEntity
       , theFall
-      , theWriter
       , hastursEnd
-      , hastursLastStand
       , yigsMercy
       , anotherWay
       , josefsPlan
@@ -164,28 +164,74 @@ allStoryCards =
       , familialPain
       , thePredatoryHouse
       , barriersDecoysAndTraps
+      , theAbyss
       , dayOne
       , nightOne
       , dayTwo
       , nightTwo
       , dayThree
       , nightThree
-      , theAbyss
+      , westernWinds
+      , ruthlessCharge
+      , hurricaneForce
+      , direGale
+      , dreadsight
+      , demolition
+      , fifthEye
+      , seismicStomp
+      , eldritchCall
+      , psychicRebuke
+      , risingTides
+      , hopeFades
       , returnToSickeningReality_23
       , returnToSickeningReality_24
+      , hastursLastStand
+      , theWriter
+      , theEntity
+      , theDelusion
       , returnToUnfinishedBusiness_38
       , returnToUnfinishedBusiness_39
-      , realityAcid
+      , arcaneRunes
+      , theRift
+      , theVent
+      , theDilemma
+      , theGate
+      , encryptedGlyphs
       , theFoundationAllied
       , theFoundationRival
-      , theSyndicateAllied
-      , theSyndicateRival
       , miskatonicUniversityAllied
       , miskatonicUniversityRival
+      , theSyndicateAllied
+      , theSyndicateRival
       , silverTwilightLodgeAllied
       , silverTwilightLodgeRival
       , localsOfKingsportAllied
       , localsOfKingsportRival
+      , toTheDreamlands
+      , fateOfTheDreamers
+      , prisonersOfConquest
+      , ruinsOfSarkomand
+      , effigyOfNodens
+      , usurpTheNight
+      , theTranslatorsEvidence
+      , theSupplicantsEvidence
+      , thePriestesssEvidence
+      , theSalesmansEvidence
+      , theAssassinsEvidence
+      , theProfessorsEvidence
+      , rescueTheChemist
+      , recoverTheSample
+      , driveOffTheMiGo
+      , defuseTheExplosives
+      , aNobleLegacyPast
+      , aNobleLegacyPresent
+      , aNobleLegacyFuture
+      , aBitterRivalry
+      , redeemAFormerColleague
+      , uneasyAlliance
+      , anomaliesInSpacetime
+      , mobTroubles
+      , unspeakableAbomination
       , theStakeout
       , theHeist
       , ifTheUniformFits
@@ -197,6 +243,54 @@ allStoryCards =
       , fortunesDisfavor27
       , personalEntaglement
       , deckOfPossibilities
+      , realityAcid
+      , triumphAndSubjugation
+      -- Dark Matter (homebrew)
+      , finalDestinationDarkMatter
+      , intoTheArchivesDarkMatter
+      , k2PS187CyberneticBrainsDarkMatter
+      , strangeIsTheNightDarkMatter
+      , whatTypeOfShipIsThisDarkMatter
+      , whoAmIDarkMatter
+      , reintegratedDarkMatter_062
+      , reintegratedDarkMatter_063
+      , reintegratedDarkMatter_064
+      , reintegratedDarkMatter_065
+      , evidenceAdamTannerDarkMatter
+      , evidenceCaptainBurrDarkMatter
+      , evidenceDoctorFengDarkMatter
+      , evidenceLtArcherMichaelsDarkMatter
+      , evidenceMUD12MudbugDarkMatter
+      , evidenceSophieDarkMatter
+      , theCultistDarkMatter
+      , theMinerDarkMatter
+      , theTeacherDarkMatter
+      , arrivalOfTheKingDarkMatter
+      , delightsDarkMatter
+      , forYouAloneDarkMatter
+      , lostExpeditionDarkMatter
+      , ritualOfTheSunDarkMatter
+      , withoutATraceDarkMatter
+      -- Circus Ex Mortis (homebrew)
+      , theDarkYoungStirCircusExMortis
+      , hiddenInPlainSightCircusExMortis
+      , underLockAndKeyCircusExMortis
+      , cautiousJailersCircusExMortis
+      , deepInTheDarkCircusExMortis
+      , clappedInIronsCircusExMortis
+      , hypnoticStateCircusExMortis
+      , pathForwardCircusExMortis_180
+      , pathForwardCircusExMortis_181
+      , pathForwardCircusExMortis_182
+      , pathForwardCircusExMortis_183
+      , strikeTheHeartCircusExMortis
+      , silenceThePipesCircusExMortis
+      , raiseTheTorchCircusExMortis
+      , splitTheRockCircusExMortis
+      , scribeTheSigilCircusExMortis
+      , cleanseTheStainCircusExMortis
+      , reciteThePrayerCircusExMortis
+      , bearTheBurdenCircusExMortis
       ]
 
 victory :: Int -> CardDef -> CardDef
@@ -218,7 +312,7 @@ sickeningReality_69 :: CardDef
 sickeningReality_69 = doubleSided $ story "03069" "Sickening Reality" TheLastKing
 
 engramsOath :: CardDef
-engramsOath = doubleSided $ story "03076b" "Engram's Oath" TheLastKing
+engramsOath = otherSideIs "03076a" $ story "03076b" "Engram's Oath" TheLastKing
 
 lagneauPerdu :: CardDef
 lagneauPerdu = doubleSided $ story "03077b" "L'agneau Perdu" TheLastKing
@@ -234,37 +328,37 @@ aboveAndBelow = doubleSided $ story "03080b" "Above and Below" TheLastKing
 
 songsThatTheHyadesShallSing :: CardDef
 songsThatTheHyadesShallSing =
-  doubleSided $ story "03325b" "Songs That the Hyades Shall Sing" DimCarcosa
+  otherSideIs "03325a" $ story "03325b" "Songs That the Hyades Shall Sing" DimCarcosa
 
 starsOfAldebaran :: CardDef
-starsOfAldebaran = doubleSided $ story "03326b" "Stars of Aldebaran" DimCarcosa
+starsOfAldebaran = otherSideIs "03326a" $ story "03326b" "Stars of Aldebaran" DimCarcosa
 
 bleakDesolation :: CardDef
-bleakDesolation = doubleSided $ story "03326d" "Bleak Desolation" DimCarcosa
+bleakDesolation = otherSideIs "03326c" $ story "03326d" "Bleak Desolation" DimCarcosa
 
 inhabitantOfCarcosa :: CardDef
-inhabitantOfCarcosa = doubleSided $ story "03327b" "Inhabitant of Carcosa" DimCarcosa
+inhabitantOfCarcosa = otherSideIs "03327a" $ story "03327b" "Inhabitant of Carcosa" DimCarcosa
 
 aMomentsRest :: CardDef
-aMomentsRest = doubleSided $ story "03327d" "A Moment's Rest" DimCarcosa
+aMomentsRest = otherSideIs "03327c" $ story "03327d" "A Moment's Rest" DimCarcosa
 
 theCoffin :: CardDef
-theCoffin = doubleSided $ story "03327f" "The Coffin" DimCarcosa
+theCoffin = otherSideIs "03327e" $ story "03327f" "The Coffin" DimCarcosa
 
 mappingTheStreets :: CardDef
-mappingTheStreets = doubleSided $ story "03328b" "Mapping the Streets" DimCarcosa
+mappingTheStreets = otherSideIs "03328a" $ story "03328b" "Mapping the Streets" DimCarcosa
 
 theKingsParade :: CardDef
-theKingsParade = doubleSided $ story "03328d" "The King's Parade" DimCarcosa
+theKingsParade = otherSideIs "03328c" $ story "03328d" "The King's Parade" DimCarcosa
 
 theArchway :: CardDef
-theArchway = doubleSided $ story "03328f" "The Archway" DimCarcosa
+theArchway = otherSideIs "03328e" $ story "03328f" "The Archway" DimCarcosa
 
 theHeightOfTheDepths :: CardDef
-theHeightOfTheDepths = doubleSided $ story "03329b" "The Height of the Depths" DimCarcosa
+theHeightOfTheDepths = otherSideIs "03329a" $ story "03329b" "The Height of the Depths" DimCarcosa
 
 stepsOfThePalace :: CardDef
-stepsOfThePalace = doubleSided $ story "03329d" "Steps of the Palace" DimCarcosa
+stepsOfThePalace = otherSideIs "03329c" $ story "03329d" "Steps of the Palace" DimCarcosa
 
 theFall :: CardDef
 theFall = doubleSided $ story "03330b" "The Fall" DimCarcosa
@@ -282,22 +376,28 @@ josefsPlan :: CardDef
 josefsPlan = doubleSided $ story "05085b" "Josef's Plan" AtDeathsDoorstep
 
 unfinishedBusiness_B :: CardDef
-unfinishedBusiness_B = victory 1 $ doubleSided $ story "05178b" "Unfinished Business" TheWagesOfSin
+unfinishedBusiness_B =
+  victory 1 $ otherSideIs "05178a" $ story "05178b" "Unfinished Business" TheWagesOfSin
 
 unfinishedBusiness_D :: CardDef
-unfinishedBusiness_D = victory 1 $ doubleSided $ story "05178d" "Unfinished Business" TheWagesOfSin
+unfinishedBusiness_D =
+  victory 1 $ otherSideIs "05178c" $ story "05178d" "Unfinished Business" TheWagesOfSin
 
 unfinishedBusiness_F :: CardDef
-unfinishedBusiness_F = victory 1 $ doubleSided $ story "05178f" "Unfinished Business" TheWagesOfSin
+unfinishedBusiness_F =
+  victory 1 $ otherSideIs "05178e" $ story "05178f" "Unfinished Business" TheWagesOfSin
 
 unfinishedBusiness_H :: CardDef
-unfinishedBusiness_H = victory 1 $ doubleSided $ story "05178h" "Unfinished Business" TheWagesOfSin
+unfinishedBusiness_H =
+  victory 1 $ otherSideIs "05178g" $ story "05178h" "Unfinished Business" TheWagesOfSin
 
 unfinishedBusiness_J :: CardDef
-unfinishedBusiness_J = victory 1 $ doubleSided $ story "05178j" "Unfinished Business" TheWagesOfSin
+unfinishedBusiness_J =
+  victory 1 $ otherSideIs "05178i" $ story "05178j" "Unfinished Business" TheWagesOfSin
 
 unfinishedBusiness_L :: CardDef
-unfinishedBusiness_L = victory 1 $ doubleSided $ story "05178l" "Unfinished Business" TheWagesOfSin
+unfinishedBusiness_L =
+  victory 1 $ otherSideIs "05178k" $ story "05178l" "Unfinished Business" TheWagesOfSin
 
 gavriellasFate :: CardDef
 gavriellasFate = doubleSided $ story "05262" "Gavriella's Fate" UnionAndDisillusion
@@ -558,11 +658,14 @@ thePredatoryHouse = story "10524" "The Predatory House" HemlockHouse & otherSide
 barriersDecoysAndTraps :: CardDef
 barriersDecoysAndTraps = story "10627" "Barriers, Decoys, and Traps" TheLongestNight
 
+theAbyss :: CardDef
+theAbyss = story "10670b" "The Abyss" FateOfTheVale
+
 dayOne :: CardDef
 dayOne = story "10675" "Day One" TheFirstDay & otherSideIs "10675b"
 
 nightOne :: CardDef
-nightOne = story "10675b" "Day One" TheFirstDay & otherSideIs "10675"
+nightOne = story "10675b" "Night One" TheFirstDay & otherSideIs "10675"
 
 dayTwo :: CardDef
 dayTwo = story "10677" "Day Two" TheSecondDay & otherSideIs "10677b"
@@ -576,8 +679,51 @@ dayThree = story "10679" "Day Three" TheFinalDay & otherSideIs "10679b"
 nightThree :: CardDef
 nightThree = story "10679b" "Night Three" TheFinalDay & otherSideIs "10679"
 
-theAbyss :: CardDef
-theAbyss = story "10670b" "The Abyss" FateOfTheVale
+-- The Drowned City
+
+westernWinds :: CardDef
+westernWinds = doubleSided $ story "11640" "Western Winds" ObsidianCanyons
+
+-- The modular "Cthulhu deck" of action cards (The Doom of Arkham Pt II) shares a
+-- distinct card back.
+cthulhuDeckBack :: Map Text Value
+cthulhuDeckBack = mapFromList [("customBack", String "back_cthulhu_deck.jpg")]
+
+cthulhuDeckCard :: CardCode -> Name -> EncounterSet -> CardDef
+cthulhuDeckCard cCode name encounterSet = (story cCode name encounterSet) {cdMeta = cthulhuDeckBack}
+
+ruthlessCharge :: CardDef
+ruthlessCharge = cthulhuDeckCard "11705" "Ruthless Charge" TheDoomOfArkhamPartII
+
+hurricaneForce :: CardDef
+hurricaneForce = cthulhuDeckCard "11706" "Hurricane Force" TheDoomOfArkhamPartII
+
+direGale :: CardDef
+direGale = cthulhuDeckCard "11707" "Dire Gale" TheDoomOfArkhamPartII
+
+dreadsight :: CardDef
+dreadsight = cthulhuDeckCard "11708" "Dreadsight" TheDoomOfArkhamPartII
+
+demolition :: CardDef
+demolition = cthulhuDeckCard "11709" "Demolition" TheDoomOfArkhamPartII
+
+fifthEye :: CardDef
+fifthEye = cthulhuDeckCard "11710" "Fifth Eye" TheDoomOfArkhamPartII
+
+seismicStomp :: CardDef
+seismicStomp = cthulhuDeckCard "11711" "Seismic Stomp" TheDoomOfArkhamPartII
+
+eldritchCall :: CardDef
+eldritchCall = cthulhuDeckCard "11712" "Eldritch Call" TheDoomOfArkhamPartII
+
+psychicRebuke :: CardDef
+psychicRebuke = cthulhuDeckCard "11713" "Psychic Rebuke" TheDoomOfArkhamPartII
+
+risingTides :: CardDef
+risingTides = cthulhuDeckCard "11714" "Rising Tides" TheDoomOfArkhamPartII
+
+hopeFades :: CardDef
+hopeFades = cthulhuDeckCard "11715" "Hope Fades" TheDoomOfArkhamPartII
 
 returnToSickeningReality_23 :: CardDef
 returnToSickeningReality_23 = doubleSided $ story "52023" "Sickening Reality" ReturnToTheLastKing
@@ -603,13 +749,23 @@ returnToUnfinishedBusiness_38 = victory 1 $ doubleSided $ story "54038b" "Unfini
 returnToUnfinishedBusiness_39 :: CardDef
 returnToUnfinishedBusiness_39 = victory 1 $ doubleSided $ story "54039b" "Unfinished Business" ReturnToTheWagesOfSin
 
-realityAcid :: CardDef
-realityAcid =
-  doubleSided
-    $ (story "89005" "Reality Acid" TheBlobThatAteEverythingELSE)
-      { cdEncounterSet = Nothing
-      , cdEncounterSetQuantity = Nothing
-      }
+arcaneRunes :: CardDef
+arcaneRunes = doubleSided $ story "70033" "Arcane Runes" LabyrinthsOfLunacyEpicMultiplayer
+
+theRift :: CardDef
+theRift = doubleSided $ story "70034" "The Rift" LabyrinthsOfLunacyEpicMultiplayer
+
+theVent :: CardDef
+theVent = doubleSided $ story "70035" "The Vent" LabyrinthsOfLunacyEpicMultiplayer
+
+theDilemma :: CardDef
+theDilemma = doubleSided $ story "70036" "The Dilemma" LabyrinthsOfLunacyEpicMultiplayer
+
+theGate :: CardDef
+theGate = doubleSided $ story "70037" "The Gate" LabyrinthsOfLunacyEpicMultiplayer
+
+encryptedGlyphs :: CardDef
+encryptedGlyphs = doubleSided $ story "70038" "Encrypted Glyphs" LabyrinthsOfLunacyEpicMultiplayer
 
 theFoundationAllied :: CardDef
 theFoundationAllied = doubleSided $ addTrait Allied $ story "71015" "The Foundation [guardian]" TheMidwinterGala
@@ -640,6 +796,98 @@ localsOfKingsportAllied = doubleSided $ addTrait Allied $ story "71039" "Locals 
 
 localsOfKingsportRival :: CardDef
 localsOfKingsportRival = doubleSided $ addTrait Rival $ story "71039b" "Locals of Kingsport [survivor]" TheMidwinterGala
+
+toTheDreamlands :: CardDef
+toTheDreamlands = otherSideIs "83022a" $ story "83022b" "To the Dreamlands" TheNightsUsurper
+
+fateOfTheDreamers :: CardDef
+fateOfTheDreamers = otherSideIs "83023a" $ story "83023b" "Fate of the Dreamers" TheNightsUsurper
+
+prisonersOfConquest :: CardDef
+prisonersOfConquest = otherSideIs "83024a" $ story "83024b" "Prisoners of Conquest" TheNightsUsurper
+
+ruinsOfSarkomand :: CardDef
+ruinsOfSarkomand = otherSideIs "83025a" $ story "83025b" "Ruins of Sarkomand" TheNightsUsurper
+
+effigyOfNodens :: CardDef
+effigyOfNodens = otherSideIs "83026a" $ story "83026b" "Effigy of Nodens" TheNightsUsurper
+
+usurpTheNight :: CardDef
+usurpTheNight = otherSideIs "83027a" $ story "83027b" "Usurp the Night" TheNightsUsurper
+
+theTranslatorsEvidence :: CardDef
+theTranslatorsEvidence =
+  victory 1 $ addTrait Evidence $ otherSideIs "83031a" $ story "83031b" "The Translator's Evidence" BrotherhoodOfTheBeast
+
+theSupplicantsEvidence :: CardDef
+theSupplicantsEvidence =
+  victory 1 $ addTrait Evidence $ otherSideIs "83032a" $ story "83032b" "The Supplicant's Evidence" BrotherhoodOfTheBeast
+
+thePriestesssEvidence :: CardDef
+thePriestesssEvidence =
+  victory 1 $ addTrait Evidence $ otherSideIs "83033a" $ story "83033b" "The Priestess's Evidence" BrotherhoodOfTheBeast
+
+theSalesmansEvidence :: CardDef
+theSalesmansEvidence =
+  victory 1 $ addTrait Evidence $ otherSideIs "83034a" $ story "83034b" "The Salesman's Evidence" BrotherhoodOfTheBeast
+
+theAssassinsEvidence :: CardDef
+theAssassinsEvidence =
+  victory 1 $ addTrait Evidence $ otherSideIs "83035a" $ story "83035b" "The Assassin's Evidence" BrotherhoodOfTheBeast
+
+theProfessorsEvidence :: CardDef
+theProfessorsEvidence =
+  victory 1 $ addTrait Evidence $ otherSideIs "83036a" $ story "83036b" "The Professor's Evidence" BrotherhoodOfTheBeast
+
+rescueTheChemist :: CardDef
+rescueTheChemist =
+  victory 1 $ addTrait Part1 $ doubleSided $ story "85021" "Rescue the Chemist" MiGoIncursion
+
+recoverTheSample :: CardDef
+recoverTheSample =
+  victory 1 $ addTrait Part1 $ doubleSided $ story "85022" "Recover the Sample" MiGoIncursion
+
+driveOffTheMiGo :: CardDef
+driveOffTheMiGo =
+  victory 1 $ addTrait Part1 $ doubleSided $ story "85023" "Drive Off the Mi-Go" MiGoIncursion
+
+defuseTheExplosives :: CardDef
+defuseTheExplosives =
+  victory 1 $ addTrait Part1 $ doubleSided $ story "85024" "Defuse the Explosives" MiGoIncursion
+
+aNobleLegacyPast :: CardDef
+aNobleLegacyPast = doubleSided $ story "87006" "A Noble Legacy (Past)" MachinationsThroughTime
+
+aNobleLegacyPresent :: CardDef
+aNobleLegacyPresent = doubleSided $ story "87015" "A Noble Legacy (Present)" MachinationsThroughTime
+
+aNobleLegacyFuture :: CardDef
+aNobleLegacyFuture = doubleSided $ story "87024" "A Noble Legacy (Future)" MachinationsThroughTime
+
+aBitterRivalry :: CardDef
+aBitterRivalry =
+  doubleSided $ addTrait Machination $ story "87033" "A Bitter Rivalry" MachinationsThroughTime
+
+redeemAFormerColleague :: CardDef
+redeemAFormerColleague =
+  doubleSided
+    $ addTrait Machination
+    $ story "87034" "Redeem a Former Colleague" MachinationsThroughTime
+
+uneasyAlliance :: CardDef
+uneasyAlliance =
+  doubleSided $ addTrait Machination $ story "87035" "Uneasy Alliance" MachinationsThroughTime
+
+anomaliesInSpacetime :: CardDef
+anomaliesInSpacetime =
+  doubleSided $ addTrait Plot $ story "87038" "Anomalies in Spacetime" MachinationsThroughTime
+
+mobTroubles :: CardDef
+mobTroubles = doubleSided $ addTrait Plot $ story "87039" "Mob Troubles" MachinationsThroughTime
+
+unspeakableAbomination :: CardDef
+unspeakableAbomination =
+  doubleSided $ addTrait Plot $ story "87042" "Unspeakable Abomination" MachinationsThroughTime
 
 theStakeout :: CardDef
 theStakeout = doubleSided $ story "88023" "The Stakeout" FortuneAndFolly
@@ -673,3 +921,200 @@ personalEntaglement = doubleSided $ story "88027b" "Personal Entanglement" Fortu
 
 deckOfPossibilities :: CardDef
 deckOfPossibilities = doubleSided $ story "88043b" "Deck of Possibilities" FortuneAndFolly
+
+realityAcid :: CardDef
+realityAcid =
+  doubleSided
+    $ (story "89005" "Reality Acid" TheBlobThatAteEverythingELSE)
+      { cdEncounterSet = Nothing
+      , cdEncounterSetQuantity = Nothing
+      }
+
+triumphAndSubjugation :: CardDef
+triumphAndSubjugation = story "90023b" "Triumph and Subjugation" BadBlood & otherSideIs "90023"
+
+
+--- Dark Matter (homebrew)
+-- Dark Matter (fan campaign by Axolotl): the_tatterdemalion
+finalDestinationDarkMatter :: CardDef
+finalDestinationDarkMatter =
+  withScanIcons [LS.T, LS.Trefoil]
+    $ (story "z-dark-matter-030" "Final Destination" DarkMatterTheTatterdemalion) {cdVictoryPoints = Just 1}
+
+intoTheArchivesDarkMatter :: CardDef
+intoTheArchivesDarkMatter =
+  withScanIcons [LS.Trefoil]
+    $ (story "z-dark-matter-032" "Into the Archives" DarkMatterTheTatterdemalion) {cdVictoryPoints = Just 1}
+
+k2PS187CyberneticBrainsDarkMatter :: CardDef
+k2PS187CyberneticBrainsDarkMatter =
+  withScanIcons [LS.T, LS.Trefoil]
+    $ (story "z-dark-matter-034" "K2-PS187 Cybernetic Brains" DarkMatterTheTatterdemalion) {cdVictoryPoints = Just 1}
+
+strangeIsTheNightDarkMatter :: CardDef
+strangeIsTheNightDarkMatter =
+  withScanIcons [LS.Star]
+    $ (story "z-dark-matter-039" "Strange is the Night" DarkMatterTheTatterdemalion) {cdVictoryPoints = Just 1}
+
+whatTypeOfShipIsThisDarkMatter :: CardDef
+whatTypeOfShipIsThisDarkMatter =
+  withScanIcons [LS.Moon, LS.Hourglass]
+    $ (story "z-dark-matter-041" "What Type of Ship is This?" DarkMatterTheTatterdemalion) {cdVictoryPoints = Just 2}
+
+whoAmIDarkMatter :: CardDef
+whoAmIDarkMatter =
+  withScanIcons [LS.Triangle]
+    $ (story "z-dark-matter-042" "Who am I?" DarkMatterTheTatterdemalion) {cdVictoryPoints = Just 1}
+
+-- Dark Matter (fan campaign by Axolotl): electric_nightmare
+reintegratedDarkMatter_062 :: CardDef
+reintegratedDarkMatter_062 =
+  doubleSided $ story "z-dark-matter-062" "Reintegrated" DarkMatterElectricNightmare
+
+reintegratedDarkMatter_063 :: CardDef
+reintegratedDarkMatter_063 =
+  doubleSided $ story "z-dark-matter-063" "Reintegrated" DarkMatterElectricNightmare
+
+reintegratedDarkMatter_064 :: CardDef
+reintegratedDarkMatter_064 =
+  doubleSided $ story "z-dark-matter-064" "Reintegrated" DarkMatterElectricNightmare
+
+reintegratedDarkMatter_065 :: CardDef
+reintegratedDarkMatter_065 =
+  doubleSided $ story "z-dark-matter-065" "Reintegrated" DarkMatterElectricNightmare
+
+-- Dark Matter (fan campaign by Axolotl): in_the_shadow_of_earth
+evidenceAdamTannerDarkMatter :: CardDef
+evidenceAdamTannerDarkMatter =
+  story "z-dark-matter-139" "Evidence (Adam Tanner)" DarkMatterInTheShadowOfEarth
+
+evidenceCaptainBurrDarkMatter :: CardDef
+evidenceCaptainBurrDarkMatter =
+  story "z-dark-matter-140" "Evidence (Captain Burr)" DarkMatterInTheShadowOfEarth
+
+evidenceDoctorFengDarkMatter :: CardDef
+evidenceDoctorFengDarkMatter =
+  story "z-dark-matter-141" "Evidence (Doctor Feng)" DarkMatterInTheShadowOfEarth
+
+evidenceLtArcherMichaelsDarkMatter :: CardDef
+evidenceLtArcherMichaelsDarkMatter =
+  story "z-dark-matter-142" "Evidence (Lt. \"Archer\" Michaels)" DarkMatterInTheShadowOfEarth
+
+evidenceMUD12MudbugDarkMatter :: CardDef
+evidenceMUD12MudbugDarkMatter =
+  story "z-dark-matter-143" "Evidence (MU-D12 \"Mudbug\")" DarkMatterInTheShadowOfEarth
+
+evidenceSophieDarkMatter :: CardDef
+evidenceSophieDarkMatter =
+  story "z-dark-matter-144" "Evidence (Sophie)" DarkMatterInTheShadowOfEarth
+
+-- Dark Matter (fan campaign by Axolotl): strange_moons
+theCultistDarkMatter :: CardDef
+theCultistDarkMatter = story "z-dark-matter-179" "The Cultist" DarkMatterStrangeMoons
+
+theMinerDarkMatter :: CardDef
+theMinerDarkMatter = story "z-dark-matter-180" "The Miner" DarkMatterStrangeMoons
+
+theTeacherDarkMatter :: CardDef
+theTeacherDarkMatter = story "z-dark-matter-181" "The Teacher" DarkMatterStrangeMoons
+
+-- Dark Matter (fan campaign by Axolotl): fragment_of_carcosa
+arrivalOfTheKingDarkMatter :: CardDef
+arrivalOfTheKingDarkMatter =
+  story "z-dark-matter-227" "Arrival of the King" DarkMatterFragmentOfCarcosa
+
+delightsDarkMatter :: CardDef
+delightsDarkMatter = story "z-dark-matter-228" "Delights" DarkMatterFragmentOfCarcosa
+
+forYouAloneDarkMatter :: CardDef
+forYouAloneDarkMatter = story "z-dark-matter-229" "For You Alone" DarkMatterFragmentOfCarcosa
+
+lostExpeditionDarkMatter :: CardDef
+lostExpeditionDarkMatter = story "z-dark-matter-230" "Lost Expedition" DarkMatterFragmentOfCarcosa
+
+-- Dark Matter (fan campaign by Axolotl): starfall
+ritualOfTheSunDarkMatter :: CardDef
+ritualOfTheSunDarkMatter = story "z-dark-matter-269" "Ritual of the Sun" DarkMatterStarfall
+
+withoutATraceDarkMatter :: CardDef
+withoutATraceDarkMatter = story "z-dark-matter-278" "Without a Trace" DarkMatterStarfall
+
+--- Circus Ex Mortis (homebrew)
+-- Circus Ex Mortis (fan campaign by Tyler Gotch): harm_s_way
+theDarkYoungStirCircusExMortis :: CardDef
+theDarkYoungStirCircusExMortis =
+  doubleSided $ story "z-circus-ex-mortis-060" "The Dark Young Stir..." CircusExMortisHarmsWay
+
+hiddenInPlainSightCircusExMortis :: CardDef
+hiddenInPlainSightCircusExMortis =
+  doubleSided $ story "z-circus-ex-mortis-061" "Hidden in Plain Sight" CircusExMortisHarmsWay
+
+underLockAndKeyCircusExMortis :: CardDef
+underLockAndKeyCircusExMortis =
+  doubleSided $ story "z-circus-ex-mortis-062" "Under Lock and Key" CircusExMortisHarmsWay
+
+cautiousJailersCircusExMortis :: CardDef
+cautiousJailersCircusExMortis =
+  doubleSided $ story "z-circus-ex-mortis-063" "Cautious Jailers" CircusExMortisHarmsWay
+
+deepInTheDarkCircusExMortis :: CardDef
+deepInTheDarkCircusExMortis =
+  doubleSided $ story "z-circus-ex-mortis-064" "Deep in the Dark" CircusExMortisHarmsWay
+
+clappedInIronsCircusExMortis :: CardDef
+clappedInIronsCircusExMortis =
+  doubleSided $ story "z-circus-ex-mortis-065" "Clapped in Irons" CircusExMortisHarmsWay
+
+hypnoticStateCircusExMortis :: CardDef
+hypnoticStateCircusExMortis =
+  doubleSided $ story "z-circus-ex-mortis-066" "Hypnotic State" CircusExMortisHarmsWay
+
+-- Circus Ex Mortis (fan campaign by Tyler Gotch): red_sunrise
+pathForwardCircusExMortis_180 :: CardDef
+pathForwardCircusExMortis_180 =
+  doubleSided $ (story "z-circus-ex-mortis-180" "Path Forward" CircusExMortisRedSunrise) {cdEncounterSetQuantity = Just 2}
+
+pathForwardCircusExMortis_181 :: CardDef
+pathForwardCircusExMortis_181 =
+  doubleSided $ (story "z-circus-ex-mortis-181" "Path Forward" CircusExMortisRedSunrise) {cdEncounterSetQuantity = Just 2}
+
+pathForwardCircusExMortis_182 :: CardDef
+pathForwardCircusExMortis_182 =
+  doubleSided $ (story "z-circus-ex-mortis-182" "Path Forward" CircusExMortisRedSunrise) {cdEncounterSetQuantity = Just 2}
+
+pathForwardCircusExMortis_183 :: CardDef
+pathForwardCircusExMortis_183 =
+  doubleSided $ (story "z-circus-ex-mortis-183" "Path Forward" CircusExMortisRedSunrise) {cdEncounterSetQuantity = Just 2}
+
+-- Circus Ex Mortis (fan campaign by Tyler Gotch): thousand_to_one
+strikeTheHeartCircusExMortis :: CardDef
+strikeTheHeartCircusExMortis =
+  doubleSided $ story "z-circus-ex-mortis-201" "Strike the Heart" CircusExMortisThousandToOne
+
+silenceThePipesCircusExMortis :: CardDef
+silenceThePipesCircusExMortis =
+  doubleSided $ story "z-circus-ex-mortis-202" "Silence the Pipes" CircusExMortisThousandToOne
+
+raiseTheTorchCircusExMortis :: CardDef
+raiseTheTorchCircusExMortis =
+  doubleSided $ story "z-circus-ex-mortis-203" "Raise the Torch" CircusExMortisThousandToOne
+
+splitTheRockCircusExMortis :: CardDef
+splitTheRockCircusExMortis =
+  doubleSided $ story "z-circus-ex-mortis-204" "Split the Rock" CircusExMortisThousandToOne
+
+scribeTheSigilCircusExMortis :: CardDef
+scribeTheSigilCircusExMortis =
+  doubleSided $ story "z-circus-ex-mortis-205" "Scribe the Sigil" CircusExMortisThousandToOne
+
+cleanseTheStainCircusExMortis :: CardDef
+cleanseTheStainCircusExMortis =
+  doubleSided $ story "z-circus-ex-mortis-206" "Cleanse the Stain" CircusExMortisThousandToOne
+
+reciteThePrayerCircusExMortis :: CardDef
+reciteThePrayerCircusExMortis =
+  doubleSided $ story "z-circus-ex-mortis-207" "Recite the Prayer" CircusExMortisThousandToOne
+
+bearTheBurdenCircusExMortis :: CardDef
+bearTheBurdenCircusExMortis =
+  doubleSided $ story "z-circus-ex-mortis-208" "Bear the Burden" CircusExMortisThousandToOne

@@ -7,6 +7,7 @@ newtype EnemyTrait = EnemyTrait {unEnemyTrait :: Trait}
 data Trait
   = Abandoned
   | Abomination
+  | Abyss
   | Agency
   | Alchemy
   | Alexandria
@@ -15,12 +16,15 @@ data Trait
   | Altered
   | Ancient
   | AncientOne
+  | Apiary
   | Apparel
   | Arkham
   | ArkhamAsylum
   | Armor
+  | Artifact
   | Artist
   | Assistant
+  | Attack
   | Augury
   | Avatar
   | Bane
@@ -37,9 +41,11 @@ data Trait
   | Boon
   | Bridge
   | Broken
+  | Brotherhood
   | BuenosAires
   | Byakhee
   | Bystander
+  | Cairo
   | Campsite
   | Carnevale
   | Cart
@@ -58,6 +64,7 @@ data Trait
   | CloverClub
   | Coastal
   | Colour
+  | Completed
   | Composure
   | Condition
   | Connection
@@ -72,6 +79,7 @@ data Trait
   | Crew
   | CrimeScene
   | Criminal
+  | Cthulhu
   | Cultist
   | Curse
   | Cursed
@@ -79,12 +87,14 @@ data Trait
   | DarkYoung
   | DeepOne
   | Depths
+  | Desert
   | Desperate
   | Detective
   | Developed
   | Dhole
   | Dilemma
   | Dinosaur
+  | Distortion
   | Dormant
   | Double
   | Dreamer
@@ -96,7 +106,9 @@ data Trait
   | Eldritch
   | Elite
   | Emissary
+  | Enclave
   | Endtimes
+  | Enraged
   | Entrepreneur
   | Evidence
   | Exhibit
@@ -122,10 +134,13 @@ data Trait
   | Future
   | Gambit
   | Game
+  | Front
   | Geist
   | Ghast
   | Ghoul
   | Glacier
+  | Glyph
+  | Government
   | Grant
   | Graveyard
   | GroundFloor
@@ -161,6 +176,7 @@ data Trait
   | Job
   | Jungle
   | Kadath
+  | Keeper
   | Key
   | Kingsport
   | KualaLumpur
@@ -169,11 +185,13 @@ data Trait
   | Lead
   | Leader
   | Leng
+  | Lift
   | Lit
   | LocusSite
   | Lodge
   | London
   | Lunatic
+  | Machination
   | Madness
   | Mainland
   | Manifold
@@ -190,38 +208,50 @@ data Trait
   | Miskatonic
   | Mnar
   | Monster
+  | Montreal
   | Mountain
   | Mountains
   | Mutated
   | Mutation
   | Mystery
+  | Nest
   | NewOrleans
+  | NewYorkCity
   | Nightgaunt
   | Obstacle
   | Occult
   | Ocean
   | Omen
   | OothNargai
+  | Ooze
+  | Oozified
   | Oriab
   | Otherworld
   | Outsider
   | Pact
   | Paradox
   | Paris
+  | Part1
   | Passageway
+  | Past
   | Patron
   | Performer
+  | Plot
   | Pnakotus
   | Poison
   | Police
   | Port
+  | Portal
   | Possessed
   | Power
   | Practiced
+  | Present
+  | Prison
   | Profession
   | PresentDay
   | Private
   | Prop
+  | Providence
   | Public
   | Rail
   | Ranged
@@ -232,6 +262,7 @@ data Trait
   | Resolute
   | Restricted
   | Risen
+  | Rlyeh
   | Ritual
   | RitualSite
   | Rival
@@ -240,7 +271,9 @@ data Trait
   | Road
   | Role
   | Room
+  | Rooftop
   | Rot
+  | Ruined
   | Ruins
   | Salem
   | Sanctum
@@ -249,7 +282,10 @@ data Trait
   | Scheme
   | Scholar
   | Science
+  | Scientist
   | Scion
+  | Script
+  | Seafloor
   | SecondFloor
   | SentinelHill
   | Serpent
@@ -273,8 +309,11 @@ data Trait
   | StMarys
   | Stable
   | Staff
+  | StarSpawn
   | Station
   | Steps
+  | Stowaway
+  | Summit
   | Summon
   | Sunken
   | Supply
@@ -286,6 +325,7 @@ data Trait
   | Talent
   | Tarot
   | Task
+  | Incomplete
   | Temple
   | Tenochtitlan
   | Tentacle
@@ -295,6 +335,7 @@ data Trait
   | Tome
   | Tool
   | Tower
+  | Town
   | Train
   | Trap
   | Trick
@@ -305,10 +346,12 @@ data Trait
   | Unstable
   | Upgrade
   | Vale
+  | Vault
   | Vehicle
   | Venice
   | Veteran
   | Void
+  | Walkway
   | Warden
   | Wastes
   | Wayfarer
@@ -323,6 +366,44 @@ data Trait
   | Yoth
   | Yuggoth
   | Zoog
+  | -- Homebrew traits (Dark Matter, Circus Ex Mortis)
+    AI
+  | Access
+  | Alien
+  | AsteroidBelt
+  | Brain
+  | Camp
+  | Carcosa
+  | CircusTrain
+  | Clearing
+  | Colony
+  | Data
+  | Destiny
+  | Device
+  | Earth
+  | Elbrus
+  | FreightCar
+  | Interface
+  | LiberPater
+  | Liminal
+  | Machine
+  | Mars
+  | Medical
+  | Memory
+  | Moon
+  | NewMoonCircus
+  | Nightmare
+  | NostalgiaII
+  | Path
+  | Pluto
+  | Quantum
+  | School
+  | Simulation
+  | SpecialCar
+  | Starship
+  | Tainted
+  | Tatterdemalion
+  | Virtual
   deriving stock (Show, Eq, Generic, Ord, Enum, Bounded, Read, Data)
   deriving anyclass (ToJSON, FromJSON, Hashable)
 

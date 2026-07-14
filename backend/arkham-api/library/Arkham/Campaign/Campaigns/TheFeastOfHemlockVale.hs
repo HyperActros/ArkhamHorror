@@ -9,6 +9,7 @@ import Arkham.ChaosToken
 import Arkham.Helpers.FlavorText
 import Arkham.Helpers.Query
 import Arkham.Helpers.Xp
+import Arkham.Matcher.Investigator
 import Arkham.Message.Lifted.Choose
 import Arkham.Message.Lifted.Log
 import Arkham.Source
@@ -24,19 +25,19 @@ campaignChaosBag :: Difficulty -> [ChaosTokenFace]
 campaignChaosBag = \case
   Easy ->
     [ #"+1", #"+1", #"0", #"0", #"0", #"-1", #"-1", #"-1", #"-2", #"-2", #"-3"
-    , Skull, Skull, ElderThing
+    , Skull, Skull, ElderSign
     ]
   Standard ->
     [ #"+1", #"0", #"0", #"-1", #"-1", #"-1", #"-2", #"-2", #"-3", #"-3", #"-4"
-    , Skull, Skull, ElderThing
+    , Skull, Skull, ElderSign
     ]
   Hard ->
     [ #"0", #"0", #"0", #"-1", #"-1", #"-2", #"-2", #"-3", #"-3", #"-5", #"-5", #"-7"
-    , Skull, Skull, ElderThing
+    , Skull, Skull, ElderSign
     ]
   Expert ->
-    [ #"0", #"-1", #"-1", #"-2", #"-2", #"-3", #"-3", #"-4", #"-5", #"-5", #"-6", #"-6", #"-8"
-    , Skull, Skull, ElderThing
+    [ #"0", #"-1", #"-1", #"-2", #"-2", #"-3", #"-3", #"-4", #"-5", #"-5", #"-6", #"-7", #"-8"
+    , Skull, Skull, ElderSign
     ]
 {- FOURMOLU_ENABLE -}
 
@@ -60,6 +61,7 @@ instance IsCampaign TheFeastOfHemlockVale where
           TheThingInTheDepths -> handleTime
           TheTwistedHollow -> continue PreludeDawnOfTheSecondDay
           TheLongestNight -> continue PreludeDawnOfTheFinalDay
+          StandaloneScenarioStep _ nextStep' -> Just nextStep'
           EpilogueStep -> Nothing
           UpgradeDeckStep nextStep' -> Just nextStep'
           _ -> Nothing
@@ -102,15 +104,15 @@ instance RunMessage TheFeastOfHemlockVale where
             leadChooseOneM do
               questionLabeled' "survey"
               survey NorthPointMine do
-                scenarioLabeled' "writtenInRock" "10501-night1" $ afterPrelude WrittenInRock
+                scenarioLabeled' "writtenInRock" "10501-night1" $ campaignStepEdit_ WrittenInRock noUpgrade
               survey HemlockHarbor do
-                scenarioLabeled' "hemlockHouse" "10523-night1" $ afterPrelude HemlockHouse
+                scenarioLabeled' "hemlockHouse" "10523-night1" $ campaignStepEdit_ HemlockHouse noUpgrade
               survey PearlRidge do
-                scenarioLabeled' "theSilentHeath" "10549-night1" $ afterPrelude TheSilentHeath
+                scenarioLabeled' "theSilentHeath" "10549-night1" $ campaignStepEdit_ TheSilentHeath noUpgrade
               survey AkwanShoreline do
-                scenarioLabeled' "theLostSister" "10569-night1" $ afterPrelude TheLostSister
+                scenarioLabeled' "theLostSister" "10569-night1" $ campaignStepEdit_ TheLostSister noUpgrade
               survey EastwickBog do
-                scenarioLabeled' "theThingInTheDepths" "10588-night1" $ afterPrelude TheThingInTheDepths
+                scenarioLabeled' "theThingInTheDepths" "10588-night1" $ campaignStepEdit_ TheThingInTheDepths noUpgrade
       pure c
     ForInvestigator iid (CampaignStep (CampaignSpecificStep "preludeTheFirstEvening" Nothing)) -> do
       scope "prelude.theFirstEvening" do
@@ -169,7 +171,7 @@ instance RunMessage TheFeastOfHemlockVale where
                 interludeXpAll (toBonus "bonus" 1)
                 flavor $ setTitle "title" >> p "oldBlood2"
               labeled' "leah" do
-                incrementRecordCount JudithParkRelationshipLevel 1
+                incrementRecordCount LeahAtwoodRelationshipLevel 1
                 interludeXpAll (toBonus "bonus" 1)
                 flavor $ setTitle "title" >> p "oldBlood3"
                 when searched do
@@ -177,6 +179,7 @@ instance RunMessage TheFeastOfHemlockVale where
                   flavor $ setTitle "title" >> p "oldBlood4"
           "omega" -> do
             incrementRecordCount TheoPetersRelationshipLevel 1
+            interludeXpAll (toBonus "bonus" 1)
             reunited <- getHasRecord ThePetersFamilyWereReunited
             flavor do
               setTitle "title"
@@ -189,7 +192,6 @@ instance RunMessage TheFeastOfHemlockVale where
               record HelenPetersJoinedTheSurvey
               addCampaignCardToDeckChoice_ Assets.helenPetersTheEldestSister
           "gamma" -> do
-            incrementRecordCount TheoPetersRelationshipLevel 1
             simeonCrossedOut <- getHasRecord SimeonCrossedOut
             unless simeonCrossedOut do
               incrementRecordCount SimeonAtwoodRelationshipLevel 1
@@ -259,15 +261,15 @@ instance RunMessage TheFeastOfHemlockVale where
             leadChooseOneM do
               questionLabeled' "survey"
               survey NorthPointMine do
-                scenarioLabeled' "writtenInRock" "10501-night2" $ afterPrelude WrittenInRock
+                scenarioLabeled' "writtenInRock" "10501-night2" $ campaignStepEdit_ WrittenInRock noUpgrade
               survey HemlockHarbor do
-                scenarioLabeled' "hemlockHouse" "10523-night2" $ afterPrelude HemlockHouse
+                scenarioLabeled' "hemlockHouse" "10523-night2" $ campaignStepEdit_ HemlockHouse noUpgrade
               survey PearlRidge do
-                scenarioLabeled' "theSilentHeath" "10549-night2" $ afterPrelude TheSilentHeath
+                scenarioLabeled' "theSilentHeath" "10549-night2" $ campaignStepEdit_ TheSilentHeath noUpgrade
               survey AkwanShoreline do
-                scenarioLabeled' "theLostSister" "10569-night2" $ afterPrelude TheLostSister
+                scenarioLabeled' "theLostSister" "10569-night2" $ campaignStepEdit_ TheLostSister noUpgrade
               survey EastwickBog do
-                scenarioLabeled' "theThingInTheDepths" "10588-night2" $ afterPrelude TheThingInTheDepths
+                scenarioLabeled' "theThingInTheDepths" "10588-night2" $ campaignStepEdit_ TheThingInTheDepths noUpgrade
       pure c
     ForInvestigator iid (CampaignStep (CampaignSpecificStep "preludeTheSecondEvening" Nothing)) -> do
       scope "prelude.theSecondEvening" do
@@ -411,11 +413,86 @@ instance RunMessage TheFeastOfHemlockVale where
       let meta = toResultDefault initMeta attrs.meta
       let
         meta' =
-          case mstep of
+          case fmap (.unwrap.normalize) mstep of
             Just PreludeDawnOfTheSecondDay -> meta {day = Day2, time = Day}
             Just PreludeDawnOfTheFinalDay -> meta {day = Day3, time = Day}
             Just PreludeTheFinalEvening -> meta {day = Day3, time = Night}
             _ -> meta
       TheFeastOfHemlockVale attrs' <- lift $ defaultCampaignRunner msg c
       pure $ TheFeastOfHemlockVale $ attrs' & metaL .~ toJSON meta'
+    CampaignStep EpilogueStep -> scope "epilogue" do
+      anyAliveInvestigators <- selectAny AliveInvestigator
+      let meta = toResultDefault initMeta attrs.meta
+      marquezSacrificedHerself <- getHasRecord DrMarquezSacrificedHerselfForTheVale
+      investigatorsSacrificedThemselves <- getHasRecord TheInvestigatorsSacrificedThemselvesForTheVale
+      flavor do
+        setTitle "title"
+        p "body"
+        ul do
+          li.validate marquezSacrificedHerself "marquezSacrificedHerself"
+          li.validate investigatorsSacrificedThemselves "investigatorsSacrificedThemselves"
+          li.validate (not marquezSacrificedHerself && not investigatorsSacrificedThemselves) "otherwise"
+      flavor do
+        setTitle "title"
+        p
+          $ if
+            | marquezSacrificedHerself -> "epilogue1"
+            | investigatorsSacrificedThemselves -> "epilogue2"
+            | otherwise -> "epilogue3"
+      when (anyAliveInvestigators && not investigatorsSacrificedThemselves) do
+        push $ CampaignStep $ CampaignSpecificStep "epilogueCodex" Nothing
+      gameOver
+      pure $ TheFeastOfHemlockVale $ attrs & metaL .~ toJSON (meta {chosenCodexEntries = []})
+    CampaignStep (CampaignSpecificStep "epilogueCodex" Nothing) -> scope "epilogue" do
+      let meta = toResultDefault initMeta attrs.meta
+      leahCrossedOut <- getHasRecord LeahCrossedOut
+      simeonCrossedOut <- getHasRecord SimeonCrossedOut
+      hemlocksMadeATruce <- getHasRecord TheHemlocksMadeATruce
+      williamCrossedOut <- getHasRecord WilliamCrossedOut
+      riverCrossedOut <- getHasRecord RiverCrossedOut
+      judithCrossedOut <- getHasRecord JudithCrossedOut
+      theoCrossedOut <- getHasRecord TheoCrossedOut
+      judithLevel <- getRelationshipLevel JudithPark
+      theoLevel <- getRelationshipLevel TheoPeters
+      let atwoods = not leahCrossedOut && not simeonCrossedOut && "atwoods" `notElem` meta.chosenCodexEntries
+      let hemlocks =
+            hemlocksMadeATruce
+              && not williamCrossedOut
+              && not riverCrossedOut
+              && "hemlocks"
+              `notElem` meta.chosenCodexEntries
+
+      let judith = judithLevel >= 5 && not judithCrossedOut && "judith" `notElem` meta.chosenCodexEntries
+      let theo = theoLevel >= 5 && not theoCrossedOut && "theo" `notElem` meta.chosenCodexEntries
+      when (atwoods || hemlocks || judith || theo) do
+        leadChooseOneM do
+          labeledValidate' atwoods "atwoods"
+            $ push
+            $ CampaignStep
+            $ CampaignSpecificStep "epilogueCodex" (Just "atwoods")
+          labeledValidate' hemlocks "hemlocks"
+            $ push
+            $ CampaignStep
+            $ CampaignSpecificStep "epilogueCodex" (Just "hemlocks")
+          labeledValidate' judith "judith"
+            $ push
+            $ CampaignStep
+            $ CampaignSpecificStep "epilogueCodex" (Just "judith")
+          labeledValidate' theo "theo"
+            $ push
+            $ CampaignStep
+            $ CampaignSpecificStep "epilogueCodex" (Just "theo")
+          unscoped skip_
+      pure c
+    CampaignStep (CampaignSpecificStep "epilogueCodex" (Just entry)) -> scope "epilogue.codex" do
+      case entry of
+        "atwoods" -> scope "atwoods" $ flavor $ setTitle "title" >> p "body"
+        "hemlocks" -> scope "hemlocks" $ flavor $ setTitle "title" >> p "body"
+        "judith" -> scope "judith" $ flavor $ setTitle "title" >> p "body"
+        "theo" -> scope "theo" $ flavor $ setTitle "title" >> p "body"
+        _ -> error "Unknown epilogue codex"
+      push $ CampaignStep $ CampaignSpecificStep "epilogueCodex" Nothing
+      let meta = toResultDefault initMeta attrs.meta
+      let meta' = meta {chosenCodexEntries = entry : meta.chosenCodexEntries}
+      pure $ TheFeastOfHemlockVale $ attrs & metaL .~ toJSON meta'
     _ -> lift $ defaultCampaignRunner msg c

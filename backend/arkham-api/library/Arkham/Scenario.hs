@@ -32,7 +32,6 @@ import Arkham.Investigator.Types qualified as Field
 import Arkham.Matcher qualified as Matcher
 import Arkham.Message
 import Arkham.Message.Lifted qualified as Lifted
-import Arkham.Modifier
 import Arkham.Name
 import Arkham.Prelude
 import Arkham.Projection
@@ -42,6 +41,7 @@ import Arkham.Slot
 import Arkham.Tarot
 import Arkham.Tracing
 import Arkham.Treachery.Cards qualified as Treacheries
+import Arkham.UltimatumsAndBoons (runUltimatumsAndBoonsMessage)
 import Arkham.Window (duringTurnWindow, mkWhen)
 import Arkham.Window qualified as Window
 import Data.Map.Strict qualified as Map
@@ -527,7 +527,12 @@ instance RunMessage Scenario where
               pushAll $ addToVictoryMsgs <> [whenEnd, msg]
               pure $ overAttrs (\a -> a & inResolutionL .~ True) x
             else clearQueue >> go
-        _ -> go
+        _ -> do
+          -- Ultimatums/Boons dispatch piggybacks on the scenario the same way
+          -- tarot cards do: they are not entities, so nothing else claims
+          -- their ability uses.
+          runUltimatumsAndBoonsMessage msg
+          go
    where
     go = Scenario <$> runMessage msg s
 
@@ -545,6 +550,9 @@ instance HasChaosTokenValue Scenario where
             pure
               $ ChaosTokenValue chaosTokenFace
               $ if count (== #frost) revealed == 2 then AutoFailModifier else NegativeModifier 1
+          -- Circus Ex Mortis guide p1: the moon token's printed value is 0; its
+          -- seal-and-reveal-another effect is handled at ResolveChaosToken.
+          MoonToken -> pure $ ChaosTokenValue chaosTokenFace NoModifier
           _ -> getChaosTokenValue iid chaosTokenFace s
 
 lookupScenario :: ScenarioId -> Difficulty -> Scenario
@@ -709,12 +717,53 @@ allScenarios =
     , ("72001", SomeScenario filmFatale)
     , ("81001", SomeScenario curseOfTheRougarou)
     , ("82001", SomeScenario carnevaleOfHorrors)
+    , ("83001", SomeScenario theEternalSlumber)
+    , ("83016", SomeScenario theNightsUsurper)
+    , ("85001", SomeScenario theBlobThatAteEverything)
+    , ("86001", SomeScenario warOfTheOuterGods)
+    , ("87001", SomeScenario machinationsThroughTime)
+    , ("70001", SomeScenario theLabyrinthsOfLunacy)
     , ("84001", SomeScenario murderAtTheExcelsiorHotel)
     , ("88001", SomeScenario fortuneAndFolly)
     , ("88001b", SomeScenario fortuneAndFollyPart2)
     , ("12105", SomeScenario spreadingFlames)
     , ("12133", SomeScenario smokeAndMirrors)
     , ("12168", SomeScenario queenOfAsh)
+    , ("11501", SomeScenario oneLastJob)
+    , ("11517", SomeScenario theWesternWall)
+    , ("11536", SomeScenario theDrownedQuarter)
+    , ("11553", SomeScenario theApiary)
+    , ("11587", SomeScenario theGrandVault)
+    , ("11612", SomeScenario courtOfTheAncients)
+    , ("11639", SomeScenario obsidianCanyons)
+    , ("11673", SomeScenario sepulchreOfTheSleeper)
+    , ("11682", SomeScenario theDoomOfArkhamPartI)
+    , ("11688a", SomeScenario theDoomOfArkhamPartII)
+    , ("90032", SomeScenario byTheBook)
+    , ("90011", SomeScenario allOrNothing)
+    , ("90020", SomeScenario badBlood)
+    , ("90054", SomeScenario laidToRest)
+    , ("90094", SomeScenario enthrallingEncore)
+    , ("90004", SomeScenario readOrDie)
+    , ("90041", SomeScenario redTideRising)
+    , ("90065", SomeScenario relicsOfThePast)
+    -- Homebrew
+    , ("z-dark-matter-013", SomeScenario theTatterdemalionDarkMatter)
+    , ("z-dark-matter-053", SomeScenario electricNightmareDarkMatter)
+    , ("z-dark-matter-090", SomeScenario lostQuantumDarkMatter)
+    , ("z-dark-matter-115", SomeScenario inTheShadowOfEarthDarkMatter)
+    , ("z-dark-matter-156", SomeScenario strangeMoonsDarkMatter)
+    , ("z-dark-matter-193", SomeScenario theMachineInYellowDarkMatter)
+    , ("z-dark-matter-212", SomeScenario fragmentOfCarcosaDarkMatter)
+    , ("z-dark-matter-246", SomeScenario starfallDarkMatter)
+    , ("z-circus-ex-mortis-001", SomeScenario oneNightOnlyCircusExMortis)
+    , ("z-circus-ex-mortis-017", SomeScenario thePrimrosePathCircusExMortis)
+    , ("z-circus-ex-mortis-042", SomeScenario harmsWayCircusExMortis)
+    , ("z-circus-ex-mortis-076", SomeScenario allPointsWestCircusExMortis)
+    , ("z-circus-ex-mortis-110", SomeScenario piperAtTheGatesOfDawnCircusExMortis)
+    , ("z-circus-ex-mortis-124", SomeScenario bacchanaliaCircusExMortis)
+    , ("z-circus-ex-mortis-155", SomeScenario redSunriseCircusExMortis)
+    , ("z-circus-ex-mortis-192", SomeScenario thousandToOneCircusExMortis)
     ]
 
 scenarioEncounterSets :: Map CardCode EncounterSet
@@ -849,10 +898,51 @@ scenarioEncounterSets =
     , ("72001", EncounterSet.FilmFatale)
     , ("81001", EncounterSet.CurseOfTheRougarou)
     , ("82001", EncounterSet.CarnevaleOfHorrors)
+    , ("83001", EncounterSet.TheEternalSlumber)
+    , ("83016", EncounterSet.TheNightsUsurper)
+    , ("85001", EncounterSet.TheBlobThatAteEverything)
+    , ("86001", EncounterSet.WarOfTheOuterGods)
+    , ("87001", EncounterSet.MachinationsThroughTime)
+    , ("70001", EncounterSet.TheLabyrinthsOfLunacy)
     , ("84001", EncounterSet.MurderAtTheExcelsiorHotel)
     , ("88001", EncounterSet.FortuneAndFolly)
     , ("88001b", EncounterSet.FortuneAndFolly)
     , ("12105", EncounterSet.SpreadingFlames)
     , ("12133", EncounterSet.SmokeAndMirrors)
     , ("12168", EncounterSet.QueenOfAsh)
+    , ("11501", EncounterSet.OneLastJob)
+    , ("11517", EncounterSet.TheWesternWall)
+    , ("11536", EncounterSet.TheDrownedQuarter)
+    , ("11553", EncounterSet.TheApiary)
+    , ("11587", EncounterSet.TheGrandVault)
+    , ("11612", EncounterSet.CourtOfTheAncients)
+    , ("11639", EncounterSet.ObsidianCanyons)
+    , ("11673", EncounterSet.SepulchreOfTheSleeper)
+    , ("11682", EncounterSet.TheDoomOfArkhamPartI)
+    , ("11688a", EncounterSet.TheDoomOfArkhamPartII)
+    , ("90032", EncounterSet.ByTheBook)
+    , ("90011", EncounterSet.AllOrNothing)
+    , ("90020", EncounterSet.BadBlood)
+    , ("90054", EncounterSet.LaidToRest)
+    , ("90094", EncounterSet.EnthrallingEncore)
+    , ("90004", EncounterSet.ReadOrDie)
+    , ("90041", EncounterSet.RedTideRising)
+    , ("90065", EncounterSet.RelicsOfThePast)
+    -- Homebrew
+    , ("z-dark-matter-013", EncounterSet.DarkMatterTheTatterdemalion)
+    , ("z-dark-matter-053", EncounterSet.DarkMatterElectricNightmare)
+    , ("z-dark-matter-090", EncounterSet.DarkMatterLostQuantum)
+    , ("z-dark-matter-115", EncounterSet.DarkMatterInTheShadowOfEarth)
+    , ("z-dark-matter-156", EncounterSet.DarkMatterStrangeMoons)
+    , ("z-dark-matter-193", EncounterSet.DarkMatterTheMachineInYellow)
+    , ("z-dark-matter-212", EncounterSet.DarkMatterFragmentOfCarcosa)
+    , ("z-dark-matter-246", EncounterSet.DarkMatterStarfall)
+    , ("z-circus-ex-mortis-001", EncounterSet.CircusExMortisOneNightOnly)
+    , ("z-circus-ex-mortis-017", EncounterSet.CircusExMortisThePrimrosePath)
+    , ("z-circus-ex-mortis-042", EncounterSet.CircusExMortisHarmsWay)
+    , ("z-circus-ex-mortis-076", EncounterSet.CircusExMortisAllPointsWest)
+    , ("z-circus-ex-mortis-110", EncounterSet.CircusExMortisPiperAtTheGatesOfDawn)
+    , ("z-circus-ex-mortis-124", EncounterSet.CircusExMortisBacchanalia)
+    , ("z-circus-ex-mortis-155", EncounterSet.CircusExMortisRedSunrise)
+    , ("z-circus-ex-mortis-192", EncounterSet.CircusExMortisThousandToOne)
     ]

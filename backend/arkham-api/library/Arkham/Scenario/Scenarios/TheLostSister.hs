@@ -1,6 +1,6 @@
 module Arkham.Scenario.Scenarios.TheLostSister (theLostSister) where
 
-import Arkham.Ability.Types (AbilityRef (..))
+import Arkham.Ability
 import Arkham.Act.Cards qualified as Acts
 import Arkham.Agenda.Cards qualified as Agendas
 import Arkham.Asset.Cards qualified as Assets
@@ -9,11 +9,13 @@ import Arkham.Calculation
 import Arkham.Campaigns.TheFeastOfHemlockVale.Helpers
 import Arkham.Campaigns.TheFeastOfHemlockVale.Key
 import Arkham.Card
+import Arkham.Effect.Window
 import Arkham.EncounterSet qualified as Set
 import Arkham.Enemy.Cards qualified as Enemies
 import Arkham.Helpers.FlavorText
-import Arkham.Helpers.Modifiers (ModifierType (..), modified_, modifySelect)
-import Arkham.Helpers.Query (allInvestigators)
+import Arkham.Helpers.Modifiers (ModifierType (..), modifySelect, modifySelectWith)
+import Arkham.Modifier (setActiveDuringSetup)
+import Arkham.Helpers.Query (allInvestigators, getLead)
 import Arkham.Helpers.SkillTest (withSkillTest)
 import Arkham.Helpers.Xp
 import Arkham.I18n
@@ -22,7 +24,7 @@ import Arkham.Investigator.Types (Field (..))
 import Arkham.Location.Cards qualified as Locations
 import Arkham.Location.Grid
 import Arkham.Location.Types (Field (LocationPosition))
-import Arkham.Matcher
+import Arkham.Matcher hiding (RevealLocation)
 import Arkham.Message (pattern PassedThisSkillTest)
 import Arkham.Message.Lifted.Choose
 import Arkham.Message.Lifted.Log (record, remember, remembered)
@@ -32,7 +34,6 @@ import Arkham.Scenario.Deck
 import Arkham.Scenario.Import.Lifted
 import Arkham.ScenarioLogKey
 import Arkham.Scenarios.TheLostSister.Helpers
-import Arkham.Story.Cards qualified as Stories
 import Arkham.Trait (Trait (Abomination, Cave, Dark))
 
 newtype TheLostSister = TheLostSister ScenarioAttrs
@@ -41,23 +42,12 @@ newtype TheLostSister = TheLostSister ScenarioAttrs
 
 instance HasModifiersFor TheLostSister where
   getModifiersFor (TheLostSister a) = do
-    modifySelect a (assetIs Assets.helenPetersTheEldestSister) [DoNotTakeUpSlot #ally]
+    modifySelectWith a (assetIs Assets.helenPetersTheEldestSister) setActiveDuringSetup [DoNotTakeUpSlot #ally]
     modifySelect
       a
       (InvestigatorAt $ LocationWithTrait Dark)
       [ScenarioModifierValue "time" (toJSON Night)]
     modifySelect a (EnemyAt $ LocationWithTrait Dark) [ScenarioModifierValue "time" (toJSON Night)]
-    runMaybeT_ do
-      liftGuardM $ remembered TheoIsArguingWithHelen
-      liftGuardM $ not <$> getHasRecord TheoReconciledWithHelen
-      theo <- MaybeT $ selectOne $ assetIs Assets.theoPetersJackOfAllTrades
-      helen <- MaybeT $ selectOne $ assetIs Assets.helenPetersTheEldestSister
-      theoLoc <- MaybeT $ field AssetLocation theo
-      helenLoc <- MaybeT $ field AssetLocation helen
-      guard $ theoLoc == helenLoc
-      lift do
-        selectEach Anyone \iid -> do
-          modified_ a (AbilityTarget iid (AbilityRef (toSource theo) 1)) [IgnoreLimit]
 
 theLostSister :: Difficulty -> TheLostSister
 theLostSister difficulty = scenario TheLostSister "10569" "The Lost Sister" difficulty []
@@ -78,20 +68,26 @@ instance RunMessage TheLostSister where
       day <- getCampaignDay
       time <- getCampaignTime
       let isNight = time == Night
-      story $ i18nWithTitle "intro1"
       flavor do
+        h "title"
+        p "intro1"
         p.basic "body"
         ul $ li.nested.validate isNight "nightSkip" do
           li.validate (not isNight && day == Day1) "day1"
           li.validate (not isNight && day == Day2) "day2"
           li.validate (not isNight && day == Day3) "day3"
-      case (day, time) of
-        (Day1, Day) -> story $ i18nWithTitle "intro2"
-        (Day2, Day) -> story $ i18nWithTitle "intro3"
-        (Day3, Day) -> story $ i18nWithTitle "intro4"
-        _ -> story $ i18nWithTitle "intro5"
+      flavor do
+        h "title"
+        p $ case (day, time) of
+          (Day1, Day) -> "intro2"
+          (Day2, Day) -> "intro3"
+          (Day3, Day) -> "intro4"
+          _ -> "intro5"
       pure s
     Setup -> runScenarioSetup TheLostSister attrs do
+      day <- getCampaignDay
+      time <- getCampaignTime
+
       setup $ ul do
         li "gatherSets"
         li "currentDaySet"
@@ -103,13 +99,21 @@ instance RunMessage TheLostSister where
           li "removeTwoCaves"
           li "shuffleCavernsDeck"
           li "putTopThree"
-        li.nested "dayResidents" do
-          li "helenPeters"
-          li "theoPeters"
-          li "gideonMizrah"
-          li "williamHemlock"
-          li "removeResidents"
-        li.nested "nightResidents" do
+        li.nested.validate (time == Day) "dayResidents" do
+          if time == Day
+            then do
+              li "helenPeters"
+              li.validate (day == Day1 || day == Day2) "theoPeters"
+              li.validate (day == Day2 || day == Day3) "gideonMizrah"
+              li.validate (day == Day3) "williamHemlock"
+              li "removeResidents"
+            else do
+              li "helenPeters"
+              li "theoPeters"
+              li "gideonMizrah"
+              li "williamHemlock"
+              li "removeResidents"
+        li.nested.validate (time == Night) "nightResidents" do
           li "helenPetersNight"
           li "removeResidentsNight"
         li "setAsideEnemies"
@@ -128,28 +132,11 @@ instance RunMessage TheLostSister where
       gather Set.Myconids
 
       -- do not setScenarioDayAndTime
-      day <- getCampaignDay
-      time <- getCampaignTime
       gameModifier ScenarioSource ScenarioTarget (ScenarioModifierValue "day" (toJSON day))
       -- We default the time to Day, locations will apply Night to enemies/investigators directly
       gameModifier ScenarioSource ScenarioTarget (ScenarioModifierValue "time" (toJSON Day))
 
-      case day of
-        Day1 -> do
-          gather Set.TheFirstDay
-          placeStory $ case time of
-            Day -> Stories.dayOne
-            Night -> Stories.nightOne
-        Day2 -> do
-          gather Set.TheSecondDay
-          placeStory $ case time of
-            Day -> Stories.dayTwo
-            Night -> Stories.nightTwo
-        Day3 -> do
-          gather Set.TheFinalDay
-          placeStory $ case time of
-            Day -> Stories.dayThree
-            Night -> Stories.nightThree
+      setupHemlockDay day time
 
       setAgendaDeck [Agendas.intoTheCaves, Agendas.darknessClosesIn]
       setActDeck [Acts.theMissingSibling, Acts.onTheTrail, Acts.faceToCarapace]
@@ -243,10 +230,12 @@ instance RunMessage TheLostSister where
       let entry x = scope x $ flavor $ setTitle "title" >> p.green "body"
       case n of
         4 -> do
+          codexFinished 4
           entry "williamHemlock"
           increaseRelationshipLevel WilliamHemlock 1
           interludeXpAll (toBonus "bonus" 1)
         6 -> do
+          codexFinished 6
           entry "gideonMizrah"
           remember GideonIsSearchingForAnHeirloom
         8 -> do
@@ -270,6 +259,7 @@ instance RunMessage TheLostSister where
                   sid <- getRandom
                   beginSkillTest sid chosen attrs attrs #willpower (Fixed 4)
             else do
+              codexFinished 8
               scope "theoPeters" $ flavor do
                 setTitle "title"
                 compose.green do
@@ -277,6 +267,25 @@ instance RunMessage TheLostSister where
                   hr
                   p.validate True "otherwise"
               remember TheoIsArguingWithHelen
+
+              day <-
+                getCampaignDay <&> \case
+                  Day1 -> 1
+                  Day2 -> 2
+                  Day3 -> 3
+              createAbilityEffect EffectGameWindow
+                $ skillTestAbility
+                $ onlyOnce
+                $ restricted
+                  (SourceableWithCardCode Assets.theoPetersJackOfAllTrades theo)
+                  1
+                  ( OnSameLocation
+                      <> exists
+                        ( assetIs Assets.theoPetersJackOfAllTrades
+                            <> AssetAt (LocationWithAsset $ assetIs Assets.helenPetersTheEldestSister)
+                        )
+                  )
+                  (parleyAction $ HandDiscardCost day #any)
         Sigma -> do
           theoReconciled <- getHasRecord TheoReconciledWithHelen
           mTheo <- selectOne $ assetIs Assets.theoPetersJackOfAllTrades
@@ -303,6 +312,7 @@ instance RunMessage TheLostSister where
                   p.validate True "otherwise"
               for_ mTheo removeFromGame
         Theta -> do
+          codexFinished Theta
           entry "drRosaMarquez"
           getScenarioDeck CavernsDeck >>= \case
             [] -> pure ()
@@ -368,5 +378,34 @@ instance RunMessage TheLostSister where
           record $ AreasSurveyed AkwanShoreline
           endOfScenario
         _ -> error "invalid resolution"
+      pure s
+    ScenarioSpecific "locationDarknessChanged" v -> do
+      let (lid, before, after) = toResult v :: (LocationId, Bool, Bool)
+      when (before /= after) do
+        lead <- getLead
+        -- "after" is the new darkness of the location; flip the hybrids that are on
+        -- the wrong side onto the side that matches it. Must use enemyIsExact: plain
+        -- enemyIs matches by base card code (10584a == 10584b), so it matches a hybrid
+        -- on either side and would flip a correctly-sided one to the wrong side.
+        let wrongSide =
+              if after
+                then [Enemies.crustaceanHybridInTheLight, Enemies.limulusHybridInTheLight]
+                else [Enemies.crustaceanHybridInTheDark, Enemies.limulusHybridInTheDark]
+        selectEach (EnemyAt (LocationWithId lid) <> mapOneOf enemyIsExact wrongSide) \eid ->
+          flipOverBy lead attrs eid
+      pure s
+    Do (RevealLocation _ lid) -> do
+      -- Revealing a location can change its Dark status (e.g. the Cavern's revealed
+      -- "Open Cave" side gains Dark) under a hybrid already standing on it. A reveal
+      -- fires no enter/spawn window and no locationDarknessChanged, so the hybrid's
+      -- own flip ability never triggers. Re-sync here. Deferred to a follow-up
+      -- message because the scenario runs before the location entity for a given
+      -- message, so the revealed traits aren't visible yet during this one.
+      push $ ScenarioSpecific "syncHybridDarkness" (toJSON lid)
+      TheLostSister <$> liftRunMessage msg attrs
+    ScenarioSpecific "syncHybridDarkness" v -> do
+      let lid = toResult v :: LocationId
+      isDarkNow <- lid <=~> LocationWithTrait Dark
+      push $ ScenarioSpecific "locationDarknessChanged" (toJSON (lid, not isDarkNow, isDarkNow))
       pure s
     _ -> TheLostSister <$> liftRunMessage msg attrs

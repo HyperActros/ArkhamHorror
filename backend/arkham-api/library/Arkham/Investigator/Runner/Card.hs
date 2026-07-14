@@ -76,6 +76,7 @@ import Arkham.Helpers.Card (
   cardIsFast',
   drawThisCardFrom,
   extendedCardMatch,
+  getCardEntityTarget,
   getModifiedCardCost,
   passesLimits,
  )
@@ -226,7 +227,12 @@ handleChooseAndDiscardAsset a@InvestigatorAttrs{..} iid source assetMatcher = do
     $ targetLabels discardableAssetIds (Only . toDiscardBy iid source)
   pure a
 
-handleAddToDiscard a@InvestigatorAttrs{..} iid pc = do
+handleAddToDiscard a@InvestigatorAttrs{..} iid pc0 = do
+  -- Normalize ownership to this investigator's canonical id. The card may have
+  -- been imported under an alternate investigator code (e.g. a Revised Core
+  -- printing), which would otherwise leave a mismatched owner on the discarded
+  -- copy and break later owner-routed operations.
+  let pc = pc0 {pcOwner = Just investigatorId}
   let
     discardF = case cdWhenDiscarded (toCardDef pc) of
       ToDiscard -> discardL %~ nub . (pc :)
@@ -269,7 +275,11 @@ handleDoDiscardFromHand a@InvestigatorAttrs{..} handDiscard = do
       DiscardChoose -> do
         case handDiscard.filter of
           CardWithId _ -> do
-            let cs' = filterCards handDiscard.filter cs
+            -- An explicit by-id discard names one specific card, so it must
+            -- bypass the voluntary-weakness restriction baked into
+            -- discardableCards (which otherwise hides weaknesses when the hand
+            -- also holds non-weakness cards).
+            let cs' = filterCards handDiscard.filter investigatorHand
             pushAll [mkMsg c | c <- cs']
             pushDiscardedCards cs'
           _ -> do
@@ -411,6 +421,24 @@ handlePutOnBottomOfDeck a@InvestigatorAttrs{..} iid cid = do
   push $ PutCardOnBottomOfDeck iid (Deck.InvestigatorDeck iid) card
   pure a
 
+-- | An investigator "owns" a card when its owner is the investigator's canonical
+-- id, or any of the investigator's card codes (primary or alternate).
+--
+-- The alternate-code match handles alternate printings such as the Revised Core
+-- Set, where a card imported from the Revised decklist carries the Revised
+-- investigator code (e.g. Roland @01501@) while the investigator entity keeps its
+-- canonical id (e.g. @01001@).
+--
+-- The canonical-id match handles the inverse case, where the investigator's
+-- current form differs from its true identity: in Yithian form 'toCardDef'
+-- resolves to Body of a Yithian (@04244@), so its 'cardCodes' no longer contain
+-- the investigator's own id while the cards remain owned by that canonical id.
+-- Plain 'InvestigatorId' equality treats these as distinct, so without this the
+-- owner-routed discard would never match and the card would be lost.
+investigatorOwnsCardCode :: InvestigatorAttrs -> InvestigatorId -> Bool
+investigatorOwnsCardCode a iid =
+  iid == investigatorId a || unInvestigatorId iid `elem` (toCardDef a).cardCodes
+
 handleDiscarded a@InvestigatorAttrs{..} aid card = do
   -- TODO: This message is ugly, we should do something different
   -- TODO: There are a number of messages here that mean the asset is no longer in play, we should consolidate to a singular message
@@ -424,14 +452,16 @@ handleDiscarded a@InvestigatorAttrs{..} aid card = do
       _ -> push $ RefillSlots investigatorId []
 
   let shouldDiscard =
-        pcOwner card
-          == Just investigatorId
+        maybe False (investigatorOwnsCardCode a) (pcOwner card)
           && card
           `notElem` investigatorDiscard
           && card
           `notElem` fromMaybe [] investigatorSideDeck
 
-  pure $ a & (if shouldDiscard then discardL %~ (card :) else id) & (slotsL %~ removeFromSlots aid)
+  -- Normalize ownership to this investigator's canonical id so the discarded
+  -- copy doesn't retain a mismatched alternate-printing owner code.
+  let discardedCard = card {pcOwner = Just investigatorId}
+  pure $ a & (if shouldDiscard then discardL %~ (discardedCard :) else id) & (slotsL %~ removeFromSlots aid)
   -- Discarded _ _ (PlayerCard card) -> do
   --   let shouldDiscard = pcOwner card == Just investigatorId && card `notElem` investigatorDiscard
   --   if shouldDiscard
@@ -481,15 +511,20 @@ handleReplaceCard a@InvestigatorAttrs{..} cardId card = do
     & (decksL . each %~ map doReplace)
 
 handlePutCampaignCardIntoPlay a@InvestigatorAttrs{..} iid cardDef = do
-  let mcard = find ((== cardDef) . toCardDef) (unDeck investigatorDeck)
-  case mcard of
+  -- The card may have been drawn into hand (e.g. an opening-hand draw) or
+  -- discarded before setup puts it into play, so search all three zones.
+  let candidates =
+        map PlayerCard (unDeck investigatorDeck)
+          <> investigatorHand
+          <> map PlayerCard investigatorDiscard
+  case find ((== cardDef) . toCardDef) candidates of
     Nothing ->
       sendError $ "The game expected to find "
         <> toTitle cardDef
         <> " in the deck of "
         <> toTitle a
         <> ", but was unable to find it."
-    Just card -> push $ PutCardIntoPlay iid (PlayerCard card) Nothing NoPayment []
+    Just card -> push $ PutCardIntoPlay iid card Nothing NoPayment []
   pure a
 
 handleRemoveAllCopiesOfCardFromGame a@InvestigatorAttrs{..} iid cardCode = do
@@ -548,9 +583,10 @@ handleDoDiscardTopOfDeck a@InvestigatorAttrs{..} iid n source mTarget = do
       pushAll
         $ windowMsgs
         <> [DeckHasNoCards investigatorId mTarget | null deck']
-        <> [ DiscardedTopOfDeck iid cs source target
-           | target <- maybeToList mTarget
-           ]
+        -- Always emit DiscardedTopOfDeck so global observers (e.g. Ultimatum of
+        -- the Broken Veil) see target-less mills too; card handlers match their
+        -- own target, so GameTarget doesn't reach them.
+        <> [DiscardedTopOfDeck iid cs source (fromMaybe GameTarget mTarget)]
         <> [discardedFromDeckWindow | notNull cs']
       pure
         $ a
@@ -587,15 +623,20 @@ handleDrawCards a@InvestigatorAttrs{..} iid cardDraw = do
   drawEncounterCardWindow <- checkWindows [mkWhen $ Window.WouldDrawEncounterCard a.id cid phase]
   if cardDrawAction cardDraw
     then do
+      modifiers' <- getModifiers iid
       beforeWindowMsg <- checkWindows [mkWhen (Window.PerformAction iid #draw)]
       afterWindowMsg <- checkWindows [mkAfter (Window.PerformAction iid #draw)]
       pushAll
         $ [BeginAction, beforeWindowMsg]
         <> [drawEncounterCardWindow | cardDraw.isEncounterDraw]
-        <> [ TakeActions iid [#draw] (ActionCost 1)
-           , Will (CheckAttackOfOpportunity iid False Nothing)
-           , CheckAttackOfOpportunity iid False Nothing
-           , wouldDrawCard
+        <> [TakeActions iid [#draw] (ActionCost 1)]
+        <> [ Will (CheckAttackOfOpportunity iid False Nothing)
+           | ActionDoesNotCauseAttacksOfOpportunity #draw `notElem` modifiers'
+           ]
+        <> [ CheckAttackOfOpportunity iid False Nothing
+           | ActionDoesNotCauseAttacksOfOpportunity #draw `notElem` modifiers'
+           ]
+        <> [ wouldDrawCard
            , DoDrawCards iid
            , DrawEnded cid iid
            , afterWindowMsg
@@ -770,9 +811,12 @@ handleDoDrawCardsV2 a@InvestigatorAttrs{..} iid cardDraw = do
 handleInvestigatorDrewPlayerCardFrom a@InvestigatorAttrs{..} iid card mDeck msg = do
   hasForesight <- hasModifier iid (Foresight $ toTitle card)
   let uiRevelation = getPlayer iid >>= (`sendRevelation` (toJSON $ toCard card))
-  case toCardType card of
-    PlayerEnemyType -> pure ()
-    _ -> when (hasRevelation card) uiRevelation
+  -- Non-treachery revelation cards are shown when their CardIdSource
+  -- revelation resolves. Showing them here as well makes the client display
+  -- the same revelation twice during a normal draw. Player treacheries go
+  -- through DrewTreachery/ResolveTreachery instead, which does not send its
+  -- own revelation display, so keep showing those here.
+  when (hasRevelation card && toCardType card == PlayerTreacheryType) uiRevelation
   mWhenDraw <- for mDeck \deck ->
     checkWindows [mkWhen $ Window.DrawCard iid (toCard card) deck]
   if hasForesight
@@ -831,16 +875,36 @@ handleDoInvestigatorDrewPlayerCardFrom a@InvestigatorAttrs{..} iid card mdeck = 
   let
     cardFilter :: IsCard c => [c] -> [c]
     cardFilter = filter ((/= card.id) . toCardId)
+  -- Cards drawn simultaneously are placed in hand up front (handleDoDrawCardsV2),
+  -- then this deferred handler finalizes each draw. An effect resolving between
+  -- those two steps can relocate a just-drawn card before we get here -- e.g. a
+  -- sibling weakness's revelation that grants an action to play it (At a
+  -- Crossroads), or a random discard triggered during that action. By then the
+  -- card has settled into a final zone, and finalizing the draw would corrupt
+  -- state: re-adding it to hand leaves a phantom duplicate of the in-play copy,
+  -- and the zone strips below pull it back out of the discard, orphaning it. So
+  -- only finalize while the card is still in flight; if it has settled in play, or
+  -- (having been discarded out from under us) in the discard pile, leave it be.
+  inPlay <- isJust <$> getCardEntityTarget (toCard card)
+  let
+    drawnFromDiscard = case mdeck of
+      Just (Deck.InvestigatorDiscard _) -> True
+      _ -> False
+    settledElsewhere =
+      inPlay || (not drawnFromDiscard && card.id `elem` map toCardId investigatorDiscard)
   doCheck <- hasModifier iid CheckHandSizeAfterDraw
   when doCheck $ push $ CheckHandSize iid
   pure
-    $ a
-    & (handL %~ nub . (toCard card :))
-    & (deckL %~ filter ((/= card.id) . toCardId))
-    & (foundCardsL . each %~ cardFilter)
-    & (cardsUnderneathL %~ cardFilter)
-    & (discardL %~ cardFilter)
-    & (bondedCardsL %~ cardFilter)
+    $ if settledElsewhere
+      then a
+      else
+        a
+          & (handL %~ nub . (toCard card :))
+          & (deckL %~ filter ((/= card.id) . toCardId))
+          & (foundCardsL . each %~ cardFilter)
+          & (cardsUnderneathL %~ cardFilter)
+          & (discardL %~ cardFilter)
+          & (bondedCardsL %~ cardFilter)
 
 handleEmptyDeck a@InvestigatorAttrs{..} iid = do
   modifiers' <- getModifiers (toTarget a)
@@ -1009,9 +1073,25 @@ handleDrawFocusedToHand a@InvestigatorAttrs{..} iid' cardSource cardId = do
       fromJustNote "missing card"
         $ find ((== cardId) . toCardId) (findWithDefault [] cardSource $ a ^. foundCardsL)
     foundCards' = Map.map (filter ((/= cardId) . toCardId)) (a ^. foundCardsL)
-  push $ case zoneToDeck a.id cardSource of
-    Nothing -> drawToHand iid' card
-    Just deck -> drawToHandFrom iid' deck card
+    -- SearchAllInvestigators can surface cards from another investigator's zone or
+    -- a scenario deck (FromCollection). Those aren't in the drawer's own deck, so
+    -- the normal draw-from-deck removal would leave a duplicate. Route them through
+    -- the global obtain path (addToHand -> obtainCard), which clears the card from
+    -- any owner's hand/deck/discard and scenario decks while preserving pcOwner.
+    -- The own-zone case is left byte-for-byte identical (same draw-trigger windows).
+    inOwnZone = case cardSource of
+      Zone.FromDeck -> card `elem` map toCard (unDeck investigatorDeck)
+      Zone.FromTopOfDeck _ -> card `elem` map toCard (unDeck investigatorDeck)
+      Zone.FromBottomOfDeck _ -> card `elem` map toCard (unDeck investigatorDeck)
+      Zone.FromHand -> card `elem` investigatorHand
+      Zone.FromDiscard -> card `elem` map toCard investigatorDiscard
+      _ -> False
+  push
+    $ if inOwnZone
+      then case zoneToDeck a.id cardSource of
+        Nothing -> drawToHand iid' card
+        Just deck -> drawToHandFrom iid' deck card
+      else addToHand iid' card
   pure $ a & foundCardsL .~ foundCards' & (deckL %~ Deck . filter ((/= card) . toCard) . unDeck)
 
 handleAddFocusedToTopOfDeck a@InvestigatorAttrs{..} iid' cardId = do

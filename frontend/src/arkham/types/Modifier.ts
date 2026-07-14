@@ -51,11 +51,13 @@ export type ModifierType
   | DamageDealt
   | DiscoveredClues
   | SkillTestResultValueModifier
+  | AutomaticallyFailIfSucceedByAtLeast
   | CancelEffects
   | CannotPerformSkillTest
   | GainVictory
   | ActionCostSetToModifier
   | OtherModifier
+  | RemoveTrait
   | UIModifier
   | SkillModifier
   | SetSkillValue
@@ -70,6 +72,8 @@ export type ModifierType
   | HandSizeCardCount
   | HandSize
   | ScenarioModifierValue
+  | AsIfInHand
+  | AsIfInHandFor
 
 export type BaseSkillOf = {
   tag: "BaseSkillOf"
@@ -147,6 +151,11 @@ export type DiscoveredClues = {
 
 export type SkillTestResultValueModifier = {
   tag: "SkillTestResultValueModifier"
+  contents: number
+}
+
+export type AutomaticallyFailIfSucceedByAtLeast = {
+  tag: "AutomaticallyFailIfSucceedByAtLeast"
   contents: number
 }
 
@@ -228,8 +237,23 @@ export type Hollow = {
   contents: string
 }
 
+export type AsIfInHand = {
+  tag: "AsIfInHand"
+  contents: Card
+}
+
+export type AsIfInHandFor = {
+  tag: "AsIfInHandFor" | "AsIfInHandForPlay"
+  contents: unknown
+}
+
 export type OtherModifier = {
   tag: "OtherModifier"
+  contents: string
+}
+
+export type RemoveTrait = {
+  tag: "RemoveTrait"
   contents: string
 }
 
@@ -237,6 +261,7 @@ type UIModifierType =
   | 'Locus'
   | 'Ethereal'
   | 'Explosion'
+  | 'Oversized'
   | { tag: 'ImportantToScenario', contents: string }
   | { tag: 'OverlayCheckmark', top: number, left: number }
   | { tag: 'Rotated', contents: number}
@@ -309,6 +334,11 @@ const modifierTypeDecoder = JsonDecoder.oneOf<ModifierType>([
       tag: JsonDecoder.literal('SkillTestResultValueModifier'),
       contents: JsonDecoder.number()
     }, 'SkillTestResultValueModifier'),
+  JsonDecoder.object<AutomaticallyFailIfSucceedByAtLeast>(
+    {
+      tag: JsonDecoder.literal('AutomaticallyFailIfSucceedByAtLeast'),
+      contents: JsonDecoder.number()
+    }, 'AutomaticallyFailIfSucceedByAtLeast'),
   JsonDecoder.object<CancelEffects>(
     {
       tag: JsonDecoder.literal('CancelEffects')
@@ -349,6 +379,11 @@ const modifierTypeDecoder = JsonDecoder.oneOf<ModifierType>([
       tag: JsonDecoder.literal('CannotEnter'),
       contents: JsonDecoder.string()
     }, 'CannotEnter'),
+  JsonDecoder.object<RemoveTrait>(
+    {
+      tag: JsonDecoder.literal('RemoveTrait'),
+      contents: JsonDecoder.string()
+    }, 'RemoveTrait'),
   JsonDecoder.object<Hollow>(
     {
       tag: JsonDecoder.literal('Hollow'),
@@ -408,13 +443,35 @@ const modifierTypeDecoder = JsonDecoder.oneOf<ModifierType>([
       tag: JsonDecoder.literal('DoNotDrawConnection'),
       contents: JsonDecoder.tuple([JsonDecoder.string(), JsonDecoder.string()], 'DoNotDrawConnection')
     }, 'DoNotDrawConnection'),
+  JsonDecoder.object<AsIfInHand>(
+    {
+      tag: JsonDecoder.literal('AsIfInHand'),
+      contents: cardDecoder,
+    }, 'AsIfInHand'),
+  JsonDecoder.object<AsIfInHandFor>(
+    {
+      tag: JsonDecoder.literal('AsIfInHandFor'),
+      contents: JsonDecoder.oneOf<unknown>([
+        JsonDecoder.string(),
+        JsonDecoder.tuple([JsonDecoder.succeed(), JsonDecoder.string()], 'AsIfInHandForContents'),
+      ], 'AsIfInHandForContents'),
+    }, 'AsIfInHandFor'),
+  JsonDecoder.object<AsIfInHandFor>(
+    {
+      tag: JsonDecoder.literal('AsIfInHandForPlay'),
+      contents: JsonDecoder.oneOf<unknown>([
+        JsonDecoder.string(),
+        JsonDecoder.tuple([JsonDecoder.succeed(), JsonDecoder.string()], 'AsIfInHandForPlayContents'),
+      ], 'AsIfInHandForPlayContents'),
+    }, 'AsIfInHandForPlay'),
   JsonDecoder.object<UIModifier>(
     {
       tag: JsonDecoder.literal('UIModifier'),
       contents: JsonDecoder.oneOf<UIModifierType>([
-        JsonDecoder.literal('Locus'),
-        JsonDecoder.literal('Ethereal'),
-        JsonDecoder.literal('Explosion'),
+        JsonDecoder.object({ tag: JsonDecoder.literal('Locus') }, 'Locus').map(() => "Locus"),
+        JsonDecoder.object({ tag: JsonDecoder.literal('Ethereal') }, 'Ethereal').map(() => "Ethereal"),
+        JsonDecoder.object({ tag: JsonDecoder.literal('Explosion') }, 'Explosion').map(() => "Explosion"),
+        JsonDecoder.object({ tag: JsonDecoder.literal('Oversized') }, 'Oversized').map(() => "Oversized"),
         JsonDecoder.object({ tag: JsonDecoder.literal('ImportantToScenario'), contents: JsonDecoder.string() }, 'ImportantToScenario'),
         JsonDecoder.object({
           tag: JsonDecoder.literal('OverlayCheckmark'),

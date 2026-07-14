@@ -7,6 +7,7 @@ import type { Game } from '@/arkham/types/Game'
 import InvestigatorRow from '@/arkham/components/InvestigatorRow.vue'
 import LogIcons from '@/arkham/components/LogIcons.vue'
 import { imgsrc } from '@/arkham/helpers'
+import { setGameLocalStorageItem } from '@/arkham/localStorage'
 
 const router = useRouter()
 
@@ -96,7 +97,7 @@ async function submit() {
   try {
     const game = await importGame(formData, importMode.value)
     if (importMode.value === 'WithFriends' && investigators.value.length > 1) {
-      localStorage.setItem(`gameHost_${game.id}`, 'true')
+      setGameLocalStorageItem(game.id, 'host', 'true')
       router.push(`/games/${game.id}/claim-seat`)
     } else {
       router.push(`/games/${game.id}`)
@@ -111,6 +112,13 @@ const canSubmit = computed(() => {
   if (!selectedFile.value) return false
   if (importMode.value === 'WithFriends' && investigators.value.length > 1 && !selectedInvestigator.value) return false
   return !loading.value
+})
+
+defineExpose({
+  canSubmit,
+  loading,
+  selectedFile,
+  submit,
 })
 </script>
 
@@ -179,16 +187,6 @@ const canSubmit = computed(() => {
 
     <p v-if="error" class="error">{{ error }}</p>
 
-    <div v-if="selectedFile" class="actions">
-      <button
-        @click="submit"
-        :disabled="!canSubmit"
-        class="btn-submit"
-        type="button"
-      >
-        {{ loading ? 'Loading…' : 'Load Game' }}
-      </button>
-    </div>
   </div>
 </template>
 
@@ -389,7 +387,7 @@ const canSubmit = computed(() => {
   }
 
   &:disabled {
-    background: #555;
+    background: var(--button);
     cursor: not-allowed;
   }
 }

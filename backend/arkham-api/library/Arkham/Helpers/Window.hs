@@ -20,6 +20,7 @@ import Arkham.Enemy.Types (Field (EnemyAttacking))
 import Arkham.Event.Types qualified as Field
 import {-# SOURCE #-} Arkham.Game (abilityMatches)
 import {-# SOURCE #-} Arkham.GameEnv
+import Arkham.Game.Settings (settingsStrictAsIfAt)
 import Arkham.Helpers.Act (actMatches)
 import {-# SOURCE #-} Arkham.Helpers.Action (actionMatches)
 import Arkham.Helpers.Card (cardListMatches, extendedCardMatch)
@@ -46,6 +47,7 @@ import Arkham.Matcher qualified as Matcher
 import Arkham.Message
 import Arkham.Prelude
 import Arkham.Projection
+import Arkham.Search (searchSource)
 import Arkham.Skill.Types qualified as Field
 import Arkham.SkillTest.Base (SkillTest (..))
 import Arkham.SkillTest.Type
@@ -486,6 +488,12 @@ windowMatches iid rawSource window'@(windowTiming &&& windowType -> (timing', wT
     Matcher.ScenarioCountIncremented timing k -> guardTiming timing \case
       Window.ScenarioCountIncremented k' -> pure $ k == k'
       _ -> noMatch
+    Matcher.ScenarioCountDecremented timing k -> guardTiming timing \case
+      Window.ScenarioCountDecremented k' -> pure $ k == k'
+      _ -> noMatch
+    Matcher.RememberedLogKey timing k -> guardTiming timing \case
+      Window.RememberedLogKey k' -> pure $ k == k'
+      _ -> noMatch
     Matcher.IncreasedAlarmLevel timing whoMatcher -> guardTiming timing \case
       Window.IncreasedAlarmLevel who -> matchWho iid who whoMatcher
       _ -> noMatch
@@ -840,9 +848,16 @@ windowMatches iid rawSource window'@(windowTiming &&& windowType -> (timing', wT
       Window.AmongSearchedCards _ who -> do
         field InvestigatorSearch who >>= \case
           Nothing -> pure False
-          Just search' ->
+          Just search' -> do
+            -- During setup we suppress scenario/encounter-initiated searches (e.g. searching
+            -- the collection for a random weakness) but still allow player-card-initiated
+            -- searches (e.g. Whitton Greene's reveal-location search) to trigger reactions.
+            allowedInSetup <-
+              getInSetup >>= \case
+                False -> pure True
+                True -> sourceMatches (searchSource search') Matcher.SourceIsPlayerCard
             andM
-              [ not <$> getInSetup
+              [ pure allowedInSetup
               , maybe False (`elem` search'.allFoundCards) <$> sourceToMaybeCard source
               , matchWho iid who whoMatcher
               ]
@@ -1190,6 +1205,9 @@ windowMatches iid rawSource window'@(windowTiming &&& windowType -> (timing', wT
           , locationMatches iid source window' lid whereMatcher
           ]
       _ -> noMatch
+    Matcher.EntersLocationWithEnemy timing whoMatcher -> guardTiming timing $ \case
+      Window.EnteringLocationWithEnemy iid' _lid -> matchWho iid iid' whoMatcher
+      _ -> noMatch
     Matcher.Leaves timing whoMatcher whereMatcher -> guardTiming timing $ \case
       Window.Leaving iid' lid ->
         andM
@@ -1253,9 +1271,9 @@ windowMatches iid rawSource window'@(windowTiming &&& windowType -> (timing', wT
         andM [matchWho iid iid' whoMatcher, anyM (\a -> actionMatches iid a actionMatcher) actions]
       _ -> noMatch
     Matcher.PerformedDifferentTypesOfActionsInARow timing whoMatcher n actionMatcher -> guardTiming timing $ \case
-      Window.PerformedDifferentTypesOfActionsInARow iid' m actions
+      Window.PerformedDifferentTypesOfActionsInARow iid' m groups
         | m >= n ->
-            andM [matchWho iid iid' whoMatcher, anyM (\a -> actionMatches iid a actionMatcher) actions]
+            andM [matchWho iid iid' whoMatcher, anyM (\a -> actionMatches iid a actionMatcher) (concat groups)]
       _ -> noMatch
     Matcher.WouldHaveSkillTestResult timing whoMatcher skillTestMatcher skillTestResultMatcher -> do
       -- The #when is questionable, but "Would" based timing really is
@@ -1404,7 +1422,22 @@ windowMatches iid rawSource window'@(windowTiming &&& windowType -> (timing', wT
                   Window.PassSkillTest _ _ who _ -> matchWho iid who whoMatcher
                   _ -> noMatch
             isWindowMatch skillTestResultMatcher
+    -- "It is genuinely your turn." Matches only a real DuringTurn window (and the
+    -- fast player window via the actual turn investigator) -- NOT the NonFast
+    -- action-taking window, so "Play during your turn" Fast cards cannot be played
+    -- with a granted "as if it were your turn" action. See #4894.
     Matcher.DuringTurn whoMatcher -> guardTiming #when $ \case
+      Window.DuringTurn who -> matchWho iid who whoMatcher
+      Window.FastPlayerWindow -> do
+        miid <- selectOne Matcher.TurnInvestigator
+        case miid of
+          Nothing -> pure False
+          Just who -> matchWho iid who whoMatcher
+      _ -> noMatch
+    -- "You have an action to take": matches the NonFast action-taking window
+    -- (real turn or granted action), the genuine DuringTurn window, and the fast
+    -- player window. See #4894.
+    Matcher.DuringYourAction whoMatcher -> guardTiming #when $ \case
       Window.NonFast -> matchWho iid iid whoMatcher
       Window.DuringTurn who -> matchWho iid who whoMatcher
       Window.FastPlayerWindow -> do
@@ -1448,6 +1481,20 @@ windowMatches iid rawSource window'@(windowTiming &&& windowType -> (timing', wT
               , matches (attackEnemy details) enemyMatcher
               , enemyAttackMatches iid details enemyAttackMatcher
               ]
+          -- An asset attacked "as if it were an engaged investigator" (Dogs of
+          -- War's Key Locus). Treat it as an investigator at its location, so
+          -- "an investigator at your location" matchers fire for anyone there.
+          -- Under the Chapter 2 "as if" ruling this only applies during action
+          -- resolution, not window triggers, so the window does not match.
+          SingleAttackTarget (AssetTarget aid) ->
+            andM
+              [ not . settingsStrictAsIfAt <$> getSettings
+              , aid <=~> AssetAt (locationWithInvestigator iid)
+              , not <$> isAttackCancelled details
+              , matchWho iid iid whoMatcher
+              , matches (attackEnemy details) enemyMatcher
+              , enemyAttackMatches iid details enemyAttackMatcher
+              ]
           _ -> noMatch
         _ -> noMatch
     Matcher.EnemyAttacksEvenIfCancelled timing whoMatcher enemyAttackMatcher enemyMatcher ->
@@ -1456,6 +1503,14 @@ windowMatches iid rawSource window'@(windowTiming &&& windowType -> (timing', wT
           SingleAttackTarget (InvestigatorTarget who) ->
             andM
               [ matchWho iid who whoMatcher
+              , matches (attackEnemy details) enemyMatcher
+              , enemyAttackMatches iid details enemyAttackMatcher
+              ]
+          SingleAttackTarget (AssetTarget aid) ->
+            andM
+              [ not . settingsStrictAsIfAt <$> getSettings
+              , aid <=~> AssetAt (locationWithInvestigator iid)
+              , matchWho iid iid whoMatcher
               , matches (attackEnemy details) enemyMatcher
               , enemyAttackMatches iid details enemyAttackMatcher
               ]
@@ -1620,15 +1675,16 @@ windowMatches iid rawSource window'@(windowTiming &&& windowType -> (timing', wT
                     else matches enemyId enemyMatcher
             , defeatedByMatches
                 defeatedBy
-                (defeatedByMatcher <> Matcher.BySource (Matcher.SourceOwnedBy $ Matcher.InvestigatorWithId iid))
+                (defeatedByMatcher <> Matcher.BySource (Matcher.SourceUsedBy $ Matcher.InvestigatorWithId iid))
             ]
         Window.EnemyDefeated Nothing defeatedBy enemyId | whoMatcher == Matcher.Anyone -> do
           andM
             [ case enemyMatcher of
                 AnyEnemy -> pure True
                 _ ->
-                  matches enemyId
-                    $ if timing == #after then oneOf [DefeatedEnemy enemyMatcher, enemyMatcher] else enemyMatcher
+                  if timing == #after
+                    then orM [matches enemyId $ DefeatedEnemy enemyMatcher, matches enemyId enemyMatcher]
+                    else matches enemyId enemyMatcher
             , defeatedByMatches defeatedBy defeatedByMatcher
             ]
         _ -> noMatch
@@ -1655,15 +1711,16 @@ windowMatches iid rawSource window'@(windowTiming &&& windowType -> (timing', wT
                     else matches enemyId (InPlayEnemy enemyMatcher)
             , defeatedByMatches
                 defeatedBy
-                (defeatedByMatcher <> Matcher.BySource (Matcher.SourceOwnedBy $ Matcher.InvestigatorWithId iid))
+                (defeatedByMatcher <> Matcher.BySource (Matcher.SourceUsedBy $ Matcher.InvestigatorWithId iid))
             ]
         Window.EnemyDefeated Nothing defeatedBy enemyId | whoMatcher == Matcher.Anyone -> do
           andM
             [ case enemyMatcher of
                 AnyEnemy -> pure True
                 _ ->
-                  matches enemyId
-                    $ if timing == #after then oneOf [DefeatedEnemy enemyMatcher, enemyMatcher] else enemyMatcher
+                  if timing == #after
+                    then orM [matches enemyId $ DefeatedEnemy enemyMatcher, matches enemyId enemyMatcher]
+                    else matches enemyId (InPlayEnemy enemyMatcher)
             , defeatedByMatches defeatedBy defeatedByMatcher
             ]
         _ -> noMatch
@@ -1675,8 +1732,9 @@ windowMatches iid rawSource window'@(windowTiming &&& windowType -> (timing', wT
             , case enemyMatcher of
                 AnyEnemy -> pure True
                 _ ->
-                  matches enemyId
-                    $ if timing == #after then oneOf [DefeatedEnemy enemyMatcher, enemyMatcher] else enemyMatcher
+                  if timing == #after
+                    then orM [matches enemyId $ DefeatedEnemy enemyMatcher, matches enemyId enemyMatcher]
+                    else matches enemyId enemyMatcher
             , defeatedByMatches defeatedBy defeatedByMatcher
             ]
         Window.IfEnemyDefeated Nothing defeatedBy enemyId | whoMatcher == Matcher.You -> do
@@ -1684,19 +1742,21 @@ windowMatches iid rawSource window'@(windowTiming &&& windowType -> (timing', wT
             [ case enemyMatcher of
                 AnyEnemy -> pure True
                 _ ->
-                  matches enemyId
-                    $ if timing == #after then oneOf [DefeatedEnemy enemyMatcher, enemyMatcher] else enemyMatcher
+                  if timing == #after
+                    then orM [matches enemyId $ DefeatedEnemy enemyMatcher, matches enemyId enemyMatcher]
+                    else matches enemyId enemyMatcher
             , defeatedByMatches
                 defeatedBy
-                (defeatedByMatcher <> Matcher.BySource (Matcher.SourceOwnedBy $ Matcher.InvestigatorWithId iid))
+                (defeatedByMatcher <> Matcher.BySource (Matcher.SourceUsedBy $ Matcher.InvestigatorWithId iid))
             ]
         Window.IfEnemyDefeated Nothing defeatedBy enemyId | whoMatcher == Matcher.Anyone -> do
           andM
             [ case enemyMatcher of
                 AnyEnemy -> pure True
                 _ ->
-                  matches enemyId
-                    $ if timing == #after then oneOf [DefeatedEnemy enemyMatcher, enemyMatcher] else enemyMatcher
+                  if timing == #after
+                    then orM [matches enemyId $ DefeatedEnemy enemyMatcher, matches enemyId enemyMatcher]
+                    else matches enemyId enemyMatcher
             , defeatedByMatches defeatedBy defeatedByMatcher
             ]
         _ -> noMatch
@@ -1741,39 +1801,18 @@ windowMatches iid rawSource window'@(windowTiming &&& windowType -> (timing', wT
       _ -> noMatch
     Matcher.FastPlayerWindow -> guardTiming #when (pure . (== Window.FastPlayerWindow))
     Matcher.DealtDamageOrHorror timing sourceMatcher whoMatcher -> guardTiming timing $ \case
+      -- NB. an ally (asset) you control taking damage/horror is not "you" being dealt
+      -- damage/horror; use AssetDealtDamageOrHorror for that. See issue #4910.
       Window.WouldTakeDamageOrHorror source' (InvestigatorTarget iid') _ _ ->
         andM [matchWho iid iid' whoMatcher, sourceMatches source' sourceMatcher]
-      Window.WouldTakeDamageOrHorror source' (AssetTarget aid) _ _ ->
-        andM
-          [ elem aid
-              <$> select
-                ( Matcher.AssetControlledBy
-                    $ Matcher.replaceYouMatcher iid whoMatcher
-                )
-          , sourceMatches source' sourceMatcher
-          ]
       _ -> noMatch
     Matcher.DealtDamage timing sourceMatcher whoMatcher -> guardTiming timing $ \case
       Window.DealtDamage source' _ (InvestigatorTarget iid') _ ->
         andM [matchWho iid iid' whoMatcher, sourceMatches source' sourceMatcher]
-      Window.DealtDamage source' _ (AssetTarget aid) _ ->
-        andM
-          [ elem aid
-              <$> select
-                (Matcher.AssetControlledBy $ Matcher.replaceYouMatcher iid whoMatcher)
-          , sourceMatches source' sourceMatcher
-          ]
       _ -> noMatch
     Matcher.DealtHorror timing sourceMatcher whoMatcher -> guardTiming timing $ \case
       Window.DealtHorror source' (InvestigatorTarget iid') _ ->
         andM [matchWho iid iid' whoMatcher, sourceMatches source' sourceMatcher]
-      Window.DealtHorror source' (AssetTarget aid) _ ->
-        andM
-          [ elem aid
-              <$> select
-                (Matcher.AssetControlledBy $ Matcher.replaceYouMatcher iid whoMatcher)
-          , sourceMatches source' sourceMatcher
-          ]
       _ -> noMatch
     Matcher.AssignedHorror timing whoMatcher targetListMatcher ->
       guardTiming timing $ \case

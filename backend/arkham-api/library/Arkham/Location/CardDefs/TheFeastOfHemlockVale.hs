@@ -139,13 +139,13 @@ libraryHemlockHouse40 =
 parlorHemlockHouse :: CardDef
 parlorHemlockHouse =
   otherSideIs "10541b"
-    $ victory 0
+    $ victory 1
     $ location_ "10541" "Parlor" [Room, Dormant] HemlockHouse
 
 diningRoomHemlockHouse :: CardDef
 diningRoomHemlockHouse =
   otherSideIs "10542b"
-    $ victory 0
+    $ victory 1
     $ location_ "10542" "Dining Room" [Room, Dormant] HemlockHouse
 
 foyerHemlockHouse :: CardDef
@@ -179,41 +179,41 @@ akwan = location_ "10575" "Akwan" [Coastal] TheLostSister
 suspendedGraveyard :: CardDef
 suspendedGraveyard =
   quantity 2
-    $ locationWithUnrevealed_ "10576" "Cavern" [Cave] "Suspended Graveyard" [Cave, Coastal] TheLostSister
+    $ locationWithUnrevealed_ "10576" "Cavern" [Cave, Dark] "Suspended Graveyard" [Cave, Coastal] TheLostSister
 
 hiddenCoveTheLostSister :: CardDef
 hiddenCoveTheLostSister =
-  locationWithUnrevealed_ "10577" "Cavern" [Cave] "Hidden Cove" [Coastal] TheLostSister
+  locationWithUnrevealed_ "10577" "Cavern" [Cave, Dark] "Hidden Cove" [Coastal] TheLostSister
 
 weedChokedBeach :: CardDef
 weedChokedBeach =
-  locationWithUnrevealed_ "10578" "Cavern" [Cave] "Weed-Choked Beach" [Coastal] TheLostSister
+  locationWithUnrevealed_ "10578" "Cavern" [Cave, Dark] "Weed-Choked Beach" [Coastal, Cave] TheLostSister
 
 rockyShoreline :: CardDef
 rockyShoreline =
-  locationWithUnrevealed_ "10579" "Cavern" [Cave] "Rocky Shoreline" [Coastal] TheLostSister
+  locationWithUnrevealed_ "10579" "Cavern" [Cave, Dark] "Rocky Shoreline" [Coastal] TheLostSister
 
 undergroundPools :: CardDef
 undergroundPools =
-  locationWithUnrevealed_ "10580" "Cavern" [Cave] "Underground Pools" [Cave, Dark] TheLostSister
+  locationWithUnrevealed_ "10580" "Cavern" [Cave, Dark] "Underground Pools" [Cave, Dark] TheLostSister
 
 openCave :: CardDef
 openCave =
   quantity 2
-    $ locationWithUnrevealed_ "10581" "Cavern" [Cave] "Open Cave" [Cave, Dark] TheLostSister
+    $ locationWithUnrevealed_ "10581" "Cavern" [Cave, Dark] "Open Cave" [Cave, Dark] TheLostSister
 
 fungalCave :: CardDef
 fungalCave =
   victory 1
-    $ locationWithUnrevealed_ "10582" "Cavern" [Cave] "Fungal Cave" [Cave, Lair, Dark] TheLostSister
+    $ locationWithUnrevealed_ "10582" "Cavern" [Cave, Dark] "Fungal Cave" [Cave, Lair, Dark] TheLostSister
 
-glimmeringMeadow :: CardDef
-glimmeringMeadow =
+glimmeringWoods :: CardDef
+glimmeringWoods =
   locationWithUnrevealed_
     "10612"
     "Western Woods"
     [Forest, Dark]
-    "Glimmering Meadow"
+    "Glimmering Woods"
     [Forest, Dark]
     TheTwistedHollow
 
@@ -316,7 +316,7 @@ theFarmhouse :: CardDef
 theFarmhouse = location_ "10630" "The Farmhouse" [Sanctum] TheLongestNight
 
 milkhouse :: CardDef
-milkhouse = locationWithUnrevealed_ "10631" "Atwood Farm" [Farm] "The Farmhouse" [Farm] TheLongestNight
+milkhouse = locationWithUnrevealed_ "10631" "Atwood Farm" [Farm] "Milkhouse" [Farm] TheLongestNight
 
 vineyard :: CardDef
 vineyard = locationWithUnrevealed_ "10632" "Atwood Farm" [Farm] "Vineyard" [Farm] TheLongestNight
@@ -526,7 +526,7 @@ iridescentPassage =
     "Cavern"
     [Cave, Dark]
     "Iridescent Passage"
-    [Cave, Dark]
+    [Cave]
     HorrorsInTheRock
 
 overgrownTunnel :: CardDef

@@ -14,7 +14,9 @@ import type { TarotCard } from '@/arkham/types/TarotCard';
 import type { Placement } from '@/arkham/types/Placement';
 import type { Source } from '@/arkham/types/Source';
 import { imgsrc } from '@/arkham/helpers';
+import { gameLocalStorageKey } from '@/arkham/localStorage';
 import { IsMobile } from '@/arkham/isMobile';
+import { useSettings } from '@/stores/settings'
 import { useDbCardStore } from '@/stores/dbCards'
 
 export interface Props {
@@ -28,7 +30,7 @@ export interface Props {
 
 const props = defineProps<Props>()
 
-const storageKey = computed(() => `selected-tab:${props.game.id}`)
+const storageKey = computed(() => gameLocalStorageKey(props.game.id, 'selected-tab'))
 const selectedTab = useStorage<string>(storageKey, props.playerId)
 const userPicked = ref(false)
 
@@ -44,6 +46,13 @@ const lead = computed(() => `url('${imgsrc(`lead-investigator.png`)}')`)
 const { isMobile } = IsMobile();
 const store = useDbCardStore()
 
+// AI-investigator seats carry an entry in settings.aiPlayers. The seat badge is
+// only shown when the dev-only "AI Investigators" flag is enabled.
+const settings = useSettings()
+function isAiSeat(investigator: Investigator): boolean {
+  return settings.aiInvestigatorsEnabled && !!props.game.settings.aiPlayers[investigator.playerId]
+}
+
 function tabClass(investigator: Investigator) {
   const pid = investigator.playerId
 
@@ -54,7 +63,7 @@ function tabClass(investigator: Investigator) {
       'tab--selected': pid === selectedTab.value,
       'tab--active-player': investigator.id === props.activePlayerId,
       'tab--lead-player': investigator.id === props.game.leadInvestigatorId,
-      'tab--has-actions': pid !== props.playerId && hasChoices(investigator.playerId),
+      'tab--has-actions': pid !== selectedTab.value && hasChoices(pid),
       'glow-effect': investigator.id === 'c89001',
     },
     `tab--${investigatorClass}`,
@@ -190,6 +199,25 @@ watchEffect(() => {
     if (userPicked.value) return
   }
 
+  // In true multiplayer each player controls their own view and shouldn't be
+  // yanked to another investigator's tab during e.g. a help/commit window where
+  // multiple players have choices. We still follow a forced/target effect into
+  // another tab when this browser's player is the only player with a choice.
+  if (solo?.value !== true) {
+    const playersWithChoices = Object.keys(props.game.question).filter(pid => hasChoices(pid))
+    const onlyThisPlayerHasChoice =
+      playersWithChoices.length === 1 &&
+      playersWithChoices[0] === props.playerId
+
+    if (playerIds.length > 0 && !playerIds.includes(props.playerId) && onlyThisPlayerHasChoice) {
+      selectedTab.value = playerIds[0]
+      return
+    }
+    if (userPicked.value) return
+    selectedTab.value = props.playerId
+    return
+  }
+
   selectedTab.value = playerIds.length > 0 && !playerIds.includes(props.playerId)
     ? playerIds[0]
     : props.playerId
@@ -207,6 +235,7 @@ watchEffect(() => {
       >
         <span v-if="isMobile">{{ getInvestigatorName(investigator.name.title).split(' ')[0] }}</span>
         <span v-else>{{ getInvestigatorName(investigator.name.title) }}</span>
+        <span v-if="isAiSeat(investigator)" class="ai-badge" v-tooltip="'AI controlled'">AI</span>
         <button
           v-if="solo"
           v-tooltip="instructions(investigator)"
@@ -226,6 +255,7 @@ watchEffect(() => {
         :class='tabClass(investigator)'
       >
         <span>{{ investigator.name.title }}</span>
+        <span v-if="isAiSeat(investigator)" class="ai-badge" v-tooltip="'AI controlled'">AI</span>
         <button
           v-if="solo"
           v-tooltip="instructions(investigator)"
@@ -325,6 +355,14 @@ ul.tabs__header > li.tab--selected {
   opacity: 1;
 }
 
+ul.tabs__header > li.tab--has-actions {
+  opacity: 0.85;
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--select) 70%, transparent),
+    0 0 7px color-mix(in srgb, var(--select) 28%, transparent);
+  animation: tab-action-pulse 1.8s ease-in-out infinite alternate;
+}
+
 .tab--Guardian {
   background-color: var(--guardian-extra-dark);
 }
@@ -397,6 +435,21 @@ ul.tabs__header > li.tab--selected {
   }
 }
 
+.ai-badge {
+  align-self: center;
+  margin-right: 5px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 0.65em;
+  font-weight: bold;
+  letter-spacing: 0.08em;
+  line-height: 1.4;
+  color: #d7e8b0;
+  background: rgba(110, 134, 64, 0.45);
+  border: 1px solid rgba(110, 134, 64, 0.7);
+  text-transform: uppercase;
+}
+
 .fa-icon {
   animation: glow 1.5s infinite alternate;
 }
@@ -425,14 +478,27 @@ ul.tabs__header > li.tab--selected {
   to { transform: rotate(360deg); }
 }
 
+@keyframes tab-action-pulse {
+  from {
+    box-shadow:
+      inset 0 0 0 1px color-mix(in srgb, var(--select) 58%, transparent),
+      0 0 4px color-mix(in srgb, var(--select) 18%, transparent);
+  }
+  to {
+    box-shadow:
+      inset 0 0 0 1px color-mix(in srgb, var(--select) 88%, transparent),
+      0 0 9px color-mix(in srgb, var(--select) 36%, transparent);
+  }
+}
+
 @keyframes glow {
   from {
     color: #000; /* Or any other default color */
-    text-shadow: 0 0 0px #ff00ff;
+    text-shadow: 0 0 0px var(--select);
   }
   to {
-    color: #ff00ff; /* Glowing color */
-    text-shadow: 0 0 10px #ff00ff;
+    color: var(--select); /* Glowing color */
+    text-shadow: 0 0 10px var(--select);
   }
 }
 

@@ -13,11 +13,11 @@ import Arkham.Customization
 import Arkham.ForMovement
 import Arkham.Game.Settings
 import {-# SOURCE #-} Arkham.GameEnv
-import {-# SOURCE #-} Arkham.Helpers.Cost (getCanAffordCost)
+import {-# SOURCE #-} Arkham.Helpers.Cost (getAdditionalActionCost, getCanAffordCost)
 import {-# SOURCE #-} Arkham.Helpers.Criteria (passesCriteria)
 import Arkham.Helpers.Location (getLocationOf)
 import Arkham.Helpers.Modifiers (getModifiers, withoutModifier)
-import Arkham.Helpers.Query (allInvestigators)
+import Arkham.Helpers.Query (allInvestigators, getActiveInvestigatorId)
 import Arkham.Helpers.Scenario (getScenarioDeck)
 import Arkham.Helpers.Window (getThatEnemy, windowMatches)
 import Arkham.Id
@@ -69,8 +69,15 @@ getCanPerformAbility !iid !ws !ability = do
     liftGuardM $ not <$> preventedByInvestigatorModifiers iid ability
     liftGuardM $ getCanAffordAbility iid ability ws
     liftGuardM $ meetsActionRestrictions iid ws ability
-    liftGuardM $ withActiveInvestigator iid do
-      passesCriteria iid Nothing (toSource ability) ability.requestor ws criteria
+    liftGuardM do
+      -- When the active investigator is already iid (e.g. inside a cached
+      -- getActions pass), skip re-entering withActiveInvestigator: that wrapper
+      -- adds a ReaderT layer whose HasGame cache is a no-op, defeating the scoped
+      -- query cache exactly where the expensive criteria/accessibility run.
+      active <- getActiveInvestigatorId
+      if active == iid
+        then passesCriteria iid Nothing (toSource ability) ability.requestor ws criteria
+        else withActiveInvestigator iid $ passesCriteria iid Nothing (toSource ability) ability.requestor ws criteria
 
 preventedByInvestigatorModifiers
   :: (Tracing m, HasGame m) => InvestigatorId -> Ability -> m Bool
@@ -101,7 +108,10 @@ preventedByInvestigatorModifiers iid ability = do
   prevents modifiers = \case
     CannotPerformAction x -> preventsAbility x
     CannotTakeAction x | not (isFastAbility ability || ActionsAreFree `elem` modifiers) -> preventsAbility x
-    MustTakeAction x -> not <$> preventsAbility x -- reads a little weird but we want only thing things x would prevent with cannot take action
+    MustTakeAction x
+      | isActionAbility ability && not (isFastAbility ability || isReactionAbility ability) ->
+          not <$> preventsAbility x -- reads a little weird but we want only thing things x would prevent with cannot take action
+    MustTakeAction _ -> pure False
     _ -> pure False
   preventsAbility = \case
     IsAnyAction -> pure True
@@ -229,10 +239,12 @@ canDoAction' iid ab@Ability {abilitySource, abilityIndex, abilityCardCode} = \ca
           $ Matcher.locationWithInvestigator iid
           <> Matcher.LocationWithExposableConcealedCard ab.source
       if base
-        then pure $ base || concealed
-        else flip anyM modifiers \case
-          CanEvadeOverride (CriteriaOverride c) -> (|| concealed) <$> passesCriteria iid Nothing abilitySource abilitySource [] c
-          _ -> pure concealed
+        then pure True
+        else do
+          overrideValid <- flip anyM modifiers \case
+            CanEvadeOverride (CriteriaOverride c) -> passesCriteria iid Nothing abilitySource abilitySource [] c
+            _ -> pure False
+          pure $ overrideValid || concealed
   Action.Engage -> case abilitySource of
     EnemySource _ -> pure True
     _ -> do
@@ -279,6 +291,7 @@ canDoAction' iid ab@Ability {abilitySource, abilityIndex, abilityCardCode} = \ca
       , notNull <$> getScenarioDeck ExplorationDeck
       ]
   Action.Circle -> pure True
+  Action.Scan -> notNull <$> getScenarioDeck ScanningDeck
 
 getCanAffordAbility
   :: (HasCallStack, Tracing m, HasGame m) => InvestigatorId -> Ability -> [Window] -> m Bool
@@ -305,8 +318,10 @@ getCanAffordAbilityCost iid a@Ability {..} ws = do
           Just (InvestigateTargets matcher) -> do
             ls <- select (matcher <> Matcher.InvestigatableLocation)
             costs <- for ls $ \lid -> do
-              mods <- getModifiers lid
-              pure $ fold [m | not doDelayAdditionalCosts, AdditionalCostToInvestigate m <- mods]
+              -- These costs may be delayed until after choosing the target,
+              -- but affordability still depends on at least one target being
+              -- payable.
+              getAdditionalActionCost iid (toTarget lid) #investigate
             pure [OrCost costs | Free `notElem` costs]
           _ -> do
             field InvestigatorLocation iid >>= \case
@@ -314,6 +329,15 @@ getCanAffordAbilityCost iid a@Ability {..} ws = do
                 mods <- getModifiers lid
                 pure [m | not doDelayAdditionalCosts, AdditionalCostToInvestigate m <- mods]
               _ -> pure []
+      else pure []
+  exploreCosts <-
+    if #explore `elem` abilityActions a
+      then do
+        field InvestigatorLocation iid >>= \case
+          Just lid -> do
+            mods <- getModifiers lid
+            pure [m | not doDelayAdditionalCosts, AdditionalCostToExplore m <- mods]
+          _ -> pure []
       else pure []
   enterCosts <-
     if #move `elem` abilityActions a
@@ -349,8 +373,8 @@ getCanAffordAbilityCost iid a@Ability {..} ws = do
     fixEnemy = maybe id Matcher.replaceThatEnemy mThatEnemy
     costF =
       case find isSetCost modifiers of
-        Just (SetAbilityCost c) -> fixEnemy . fold . (: investigateCosts <> resignCosts <> enterCosts <> leaveCosts) . const c
-        _ -> fixEnemy . fold . (: investigateCosts <> resignCosts <> enterCosts <> leaveCosts)
+        Just (SetAbilityCost c) -> fixEnemy . fold . (: investigateCosts <> exploreCosts <> resignCosts <> enterCosts <> leaveCosts) . const c
+        _ -> fixEnemy . fold . (: investigateCosts <> exploreCosts <> resignCosts <> enterCosts <> leaveCosts)
     isSetCost = \case
       SetAbilityCost _ -> True
       _ -> False

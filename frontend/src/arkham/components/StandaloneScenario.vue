@@ -5,16 +5,23 @@ import StoryQuestion from '@/arkham/components/StoryQuestion.vue';
 import Scenario from '@/arkham/components/Scenario.vue';
 import ChooseDeck from '@/arkham/components/ChooseDeck.vue';
 import ContinueCampaign from '@/arkham/components/ContinueCampaign.vue';
+import { handleEmbeddedI18n } from '@/arkham/i18n';
+import { useI18n } from 'vue-i18n';
 
 const props = defineProps<{
   game: Game
   playerId: string
+  realityAcidLightDevoured?: boolean
+  realityAcidLightActive?: boolean
 }>()
 
 const emit = defineEmits<{
   update: [game: Game]
   choose: [idx: number]
+  toggleRealityAcidLight: []
 }>()
+
+const { t } = useI18n()
 
 async function update(game: Game) {
   emit('update', game);
@@ -52,7 +59,10 @@ const questionLabel = computed(() => {
     question = Object.values(props.game.question)[0]
   }
 
-  return question?.tag === 'QuestionLabel' ? question.label : null
+  // Ultimatums/Boons questions render their own titled panel inside ChooseDeck
+  if (question?.tag === 'QuestionLabel' && question.label?.startsWith('$label.ultimatumsAndBoons')) return null
+
+  return question?.tag === 'QuestionLabel' ? handleEmbeddedI18n(question.label, t) : null
 })
 
 const questionHash = computed(() => {
@@ -72,6 +82,13 @@ const continueCampaign = computed(() => {
 const inStep = computed(() => {
   return !!props.game.scenario?.campaignStep
 })
+
+// A PickScenarioSpecific question (e.g. Laid to Rest's spirit-deck builder) is a
+// story-style question handled by StoryQuestion. It can be asked mid-Setup while
+// the scenario is otherwise "active", so it must take priority over the board.
+const storyQuestionOverride = computed(() =>
+  Object.values(props.game.question).some((q) => q?.tag === 'PickScenarioSpecific')
+)
 </script>
 
 <template>
@@ -89,13 +106,23 @@ const inStep = computed(() => {
       :chooseSideStory="continueCampaign.chooseSideStory"
       :canChooseSideStory="continueCampaign.canChooseSideStory"
     />
+    <StoryQuestion
+      v-else-if="storyQuestionOverride"
+      :game="game"
+      :key="questionHash ?? 'no-question'"
+      :playerId="playerId"
+      @choose="choose"
+    />
     <Scenario
       v-else-if="game.scenario && game.phase !== 'CampaignPhase' && !inStep"
       :game="game"
       :scenario="game.scenario"
       :playerId="playerId"
+      :realityAcidLightDevoured="realityAcidLightDevoured"
+      :realityAcidLightActive="realityAcidLightActive"
       @choose="$emit('choose', $event)"
       @update="update"
+      @toggleRealityAcidLight="$emit('toggleRealityAcidLight')"
     />
     <template v-else>
       <StoryQuestion :game="game" :key="questionHash ?? 'no-question'" :playerId="playerId" @choose="choose" />
@@ -125,7 +152,7 @@ const inStep = computed(() => {
 }
 
 .clue--can-investigate {
-  border: 3px solid #ff00ff;
+  border: 3px solid var(--select);
   border-radius: 100px;
   cursor: pointer;
 }
@@ -148,13 +175,13 @@ const inStep = computed(() => {
     left: 0;
     right: 0;
     margin: auto;
-    z-index: -1;
+    z-index: var(--z-index-neg-1);
   }
 }
 
 .game {
   width: 100%;
-  z-index: 1;
+  z-index: var(--z-index-1);
 }
 
 .location-cards {

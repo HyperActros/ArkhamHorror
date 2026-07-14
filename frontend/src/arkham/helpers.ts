@@ -69,6 +69,13 @@ export function lowercase(word: string) {
   return word.charAt(0).toLowerCase() + word.substring(1);
 }
 
+// Absolute, shareable URL for a router-resolved href. Combines the current origin
+// + pathname with the resolved href so invite/seat links work under hash-history
+// routing. Pass `router.resolve({...}).href`.
+export function buildShareableUrl(resolvedHref: string): string {
+  return window.location.origin + window.location.pathname + resolvedHref
+}
+
 export const baseUrl = import.meta.env.PROD ? "https://assets.arkhamhorror.app" : ''
 
 export function isLocalized(src: string) {
@@ -107,6 +114,16 @@ export function imgsrc(src: string) {
   }
 
   return fullPath
+}
+
+// Homebrew card art (z- prefixed codes) lives in homebrew/ instead of cards/.
+// `art` is a c-stripped card code, optionally with a suffix (e.g. "z-dark-matter-013b").
+export function cardImgPath(art: string): string {
+  return `${art.startsWith('z-') ? 'homebrew' : 'cards'}/${art}.avif`
+}
+
+export function cardImg(art: string): string {
+  return imgsrc(cardImgPath(art))
 }
 
 export function pluralize(w: string, n: number) {
@@ -152,6 +169,7 @@ export function replaceIcons(body: string) {
     replace(/{bless}/g, '<span class="bless-icon"></span>').
     replace(/{curse}/g, '<span class="curse-icon"></span>').
     replace(/{frost}/g, '<span class="frost-icon"></span>').
+    replace(/{moon}/g, '<span class="moon-icon"></span>').
     replace(/{sealA}/g, '<span class="seal-a-icon"></span>').
     replace(/{sealB}/g, '<span class="seal-b-icon"></span>').
     replace(/{sealC}/g, '<span class="seal-c-icon"></span>').
@@ -160,7 +178,8 @@ export function replaceIcons(body: string) {
     replace(/{codex}/g, '<span class="codex-icon"></span>').
     replace(/{day}/g, '<span class="day-icon"></span>').
     replace(/{night}/g, '<span class="night-icon"></span>').
-    replace(/{perPlayer}/g, '<span class="per-player"></span>')
+    replace(/{perPlayer}/g, '<span class="per-player"></span>').
+    replace(/{rune([A-Z])}/g, `<span class="rune-$1"></span>`)
 }
 
 export type InvestigatorClass =
@@ -268,8 +287,8 @@ export function localizeArkhamDBBaseUrl() {
 
 export function processArkhamBuildDeck<T extends { slots?: Record<string, number> }>(
   data: T,
-  url: string,
-): T & { slots: Record<string, number>; url: string } {
+  url: string | null,
+): T & { slots: Record<string, number>; url: string | null } {
   const rawMeta = (data as { meta?: unknown }).meta
   const meta: { hidden_slots?: Record<string, unknown> } =
     typeof rawMeta === 'string' ? JSON.parse(rawMeta) : {}

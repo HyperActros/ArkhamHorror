@@ -4,6 +4,7 @@ module Api.Arkham.Helpers where
 
 import Arkham.Card
 import Arkham.Classes hiding (Entity (..), select)
+import Arkham.Epic.Types (EpicEnv, HasMaybeEpic (..), SharedEventState)
 import Arkham.Classes.HasGame
 import Arkham.Classes.HasQueue
 import Arkham.Debug
@@ -71,12 +72,19 @@ data ApiResponse
   | GameMessage Text
   | GameError Text
   | GameUI Text
+  | GameAudio Text
   | GameCard {title :: Text, card :: Aeson.Value}
   | GameCardOnly {player :: PlayerId, title :: Text, card :: Aeson.Value}
   | GameTarot Aeson.Value
   | GameShowDiscard InvestigatorId
   | GameShowUnder InvestigatorId
+  | -- | Above-the-table achievement unlocked (flat achievement tag); the
+    -- client renders the toast from its i18n catalog.
+    GameAchievement Text
   | GamePlayabilityInfo {cardId :: CardId, cardCode :: Text, checks :: [(Text, Maybe Text)]}
+  | -- Epic Multiplayer: the event's shared state, pushed to a group's own stream
+    -- so the shared panel renders from a single source (the group websocket).
+    SharedStateUpdate SharedEventState
   deriving stock Generic
 
 instance Aeson.ToJSON ApiResponse where
@@ -104,7 +112,13 @@ data GameApp = GameApp
   , appGen :: IORef StdGen
   , appLogger :: ClientMessage -> IO ()
   , appTracer :: Trace.Tracer
+  , appEvent :: Maybe EpicEnv
+  -- ^ present only when this game is a group within an Epic Multiplayer event;
+  -- 'Nothing' (the default for every ordinary game) means zero behavior change.
   }
+
+instance HasMaybeEpic GameApp where
+  getMaybeEpicEnv = appEvent
 
 instance HasDebugLevel GameAppT where
   getDebugLevel = liftIO getDebugLevel
@@ -146,6 +160,27 @@ runGameApp :: MonadIO m => GameApp -> GameAppT a -> m a
 runGameApp gameApp = liftIO . flip runReaderT gameApp . unGameAppT
 gameChannel :: ArkhamGameId -> RedisChannel
 gameChannel gameId = "arkham-" <> encodeUtf8 (tshow gameId)
+
+-- | Epic Multiplayer: per-event broadcast channel + room helpers, mirroring the
+-- per-game ones above but keyed by 'ArkhamEpicEventId' on 'appEventRooms'.
+eventChannel :: ArkhamEpicEventId -> RedisChannel
+eventChannel eventId = "arkham-epic-" <> encodeUtf8 (tshow eventId)
+
+getEventRoom :: (MonadIO m, HasApp m) => ArkhamEpicEventId -> m Room
+getEventRoom eid = do
+  roomsVar <- getsApp appEventRooms
+  liftIO do
+    modifyMVar roomsVar \rooms ->
+      case Map.lookup eid rooms of
+        Just r -> pure (rooms, r)
+        Nothing -> do
+          r <- newRoom (eventChannel eid)
+          pure (Map.insert eid r rooms, r)
+
+lookupEventRoom :: (MonadIO m, HasApp m) => ArkhamEpicEventId -> m (Maybe Room)
+lookupEventRoom eid = do
+  roomsVar <- getsApp appEventRooms
+  Map.lookup eid <$> liftIO (MVar.readMVar roomsVar)
 
 getRoom :: (MonadIO m, HasApp m) => ArkhamGameId -> m Room
 getRoom gid = do

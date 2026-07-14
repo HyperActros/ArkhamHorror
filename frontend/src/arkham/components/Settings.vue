@@ -4,6 +4,7 @@ import { type Game } from '@/arkham/types/Game'
 import { useDebug } from '@/arkham/debug'
 import { useI18n } from 'vue-i18n';
 import { updateGameRaw } from '@/arkham/api'
+import { gameLocalStorageKey, getGameLocalStorageItem, removeGameLocalStorageItem, setGameLocalStorageItem } from '@/arkham/localStorage'
 import campaignJSON from '@/arkham/data/campaigns.json'
 import { BugAntIcon } from '@heroicons/vue/20/solid'
 import { useSettingsFocus } from '@/composable/settingsFocus'
@@ -25,6 +26,15 @@ const showOtherHands = computed({
   set: (v: boolean) => emit('update:showOtherPlayersHands', v),
 })
 
+const soundsDisabled = ref(localStorage.getItem('arkhamSoundsDisabled') === 'true')
+
+watch(soundsDisabled, (value) => {
+  localStorage.setItem('arkhamSoundsDisabled', value ? 'true' : 'false')
+  window.dispatchEvent(new CustomEvent('arkham-setting-change', {
+    detail: { key: 'arkhamSoundsDisabled', value: value ? 'true' : 'false' }
+  }))
+})
+
 const canShowOtherHands = computed(() => !props.solo && props.game.playerCount > 1)
 
 const headerStyle = computed(() => {
@@ -40,13 +50,15 @@ const investigator = computed(() => {
 })
 
 const skipTriggers = ref(investigator.value?.settings.globalSettings.ignoreUnrelatedSkillTestTriggers ?? false)
-const cosmicEmissaryAnimationKey = computed(() => `game:${props.game.id}:enableCosmicEmissaryAnimation`)
-const legacyDisableCosmicEmissaryAnimationKey = computed(() => `game:${props.game.id}:disableCosmicEmissaryAnimation`)
+const asIfRuling = ref(props.game.settings.settingsAsIfRuling)
+const ultimatumsAndBoonsEnabled = ref(props.game.settings.settingsUltimatumsAndBoonsEnabled)
+const hasUltimatumsAndBoons = computed(() => props.game.settings.settingsUltimatumsAndBoons.length > 0)
+const cosmicEmissaryAnimationKey = computed(() => gameLocalStorageKey(props.game.id, 'enableCosmicEmissaryAnimation'))
 const showCosmicEmissaryAnimationSetting = computed(() => props.game.scenario?.id === 'c10651')
 const enableCosmicEmissaryAnimation = ref(
-  localStorage.getItem(cosmicEmissaryAnimationKey.value) === null
-    ? localStorage.getItem(legacyDisableCosmicEmissaryAnimationKey.value) !== 'true'
-    : localStorage.getItem(cosmicEmissaryAnimationKey.value) !== 'false'
+  getGameLocalStorageItem(props.game.id, 'enableCosmicEmissaryAnimation') === null
+    ? getGameLocalStorageItem(props.game.id, 'disableCosmicEmissaryAnimation') !== 'true'
+    : getGameLocalStorageItem(props.game.id, 'enableCosmicEmissaryAnimation') !== 'false'
 )
 
 watch(() => skipTriggers.value, (value) => {
@@ -60,9 +72,27 @@ watch(() => skipTriggers.value, (value) => {
   }
 })
 
+watch(() => props.game.settings.settingsAsIfRuling, (value) => {
+  asIfRuling.value = value
+})
+
+watch(asIfRuling, async (value) => {
+  if (value === props.game.settings.settingsAsIfRuling) return
+  await updateGameRaw(props.game.id, { tag: 'SetAsIfRuling', contents: value })
+})
+
+watch(() => props.game.settings.settingsUltimatumsAndBoonsEnabled, (value) => {
+  ultimatumsAndBoonsEnabled.value = value
+})
+
+watch(ultimatumsAndBoonsEnabled, async (value) => {
+  if (value === props.game.settings.settingsUltimatumsAndBoonsEnabled) return
+  await updateGameRaw(props.game.id, { tag: 'SetUltimatumsAndBoonsEnabled', contents: value })
+})
+
 watch(enableCosmicEmissaryAnimation, (value) => {
-  localStorage.setItem(cosmicEmissaryAnimationKey.value, value ? 'true' : 'false')
-  localStorage.removeItem(legacyDisableCosmicEmissaryAnimationKey.value)
+  setGameLocalStorageItem(props.game.id, 'enableCosmicEmissaryAnimation', value ? 'true' : 'false')
+  removeGameLocalStorageItem(props.game.id, 'disableCosmicEmissaryAnimation')
   window.dispatchEvent(new CustomEvent('arkham-setting-change', {
     detail: { key: cosmicEmissaryAnimationKey.value, value: value ? 'true' : 'false' }
   }))
@@ -165,7 +195,7 @@ onBeforeUnmount(() => {
 
     <div class="settings-body">
       <section class="settings-section">
-        <h3 class="section-title">{{ $t('gameBar.playerSettings') }}</h3>
+        <h3 class="section-title">Investigator Settings</h3>
 
         <div class="toggle-list">
           <div class="toggle-row" :ref="setSettingRef('skipTriggers')" :class="{ 'toggle-row--highlighted': highlightedSetting === 'skipTriggers' }">
@@ -180,7 +210,12 @@ onBeforeUnmount(() => {
               <label for="opt-skipTriggers-off">{{ $t('Off') }}</label>
             </div>
           </div>
+        </div>
+      </section>
 
+      <section class="settings-section">
+        <h3 class="section-title">Your View Settings</h3>
+        <div class="toggle-list">
           <div class="toggle-row" v-if="canShowOtherHands">
             <div class="toggle-text">
               <div class="toggle-name">{{$t('gameBar.viewSettingShowOtherPlayersHandsTitle')}}</div>
@@ -191,6 +226,19 @@ onBeforeUnmount(() => {
               <label for="opt-showHands-on">{{ $t('On') }}</label>
               <input type="radio" id="opt-showHands-off" name="opt-showHands" :checked="!showOtherHands" @change="showOtherHands = false" />
               <label for="opt-showHands-off">{{ $t('Off') }}</label>
+            </div>
+          </div>
+
+          <div class="toggle-row">
+            <div class="toggle-text">
+              <div class="toggle-name">Sounds</div>
+              <div class="toggle-desc">Play sound effects in this browser.</div>
+            </div>
+            <div class="segmented segmented-2 toggle-control">
+              <input type="radio" id="opt-sounds-on" name="opt-sounds" :checked="!soundsDisabled" @change="soundsDisabled = false" />
+              <label for="opt-sounds-on">{{ $t('On') }}</label>
+              <input type="radio" id="opt-sounds-off" name="opt-sounds" :checked="soundsDisabled" @change="soundsDisabled = true" />
+              <label for="opt-sounds-off">{{ $t('Off') }}</label>
             </div>
           </div>
 
@@ -209,9 +257,35 @@ onBeforeUnmount(() => {
         </div>
       </section>
 
-      <section v-if="recommendedToggles.length > 0" class="settings-section">
-        <h3 class="section-title">{{ $t('create.recommendedOptions') ?? 'Campaign Options' }}</h3>
+      <section class="settings-section">
+        <h3 class="section-title">Shared Game Settings</h3>
         <div class="toggle-list">
+          <div class="toggle-row">
+            <div class="toggle-text">
+              <div class="toggle-name">"As If" Ruling</div>
+              <div class="toggle-desc">Swap between Chapter 1 and Chapter 2 handling for "as if" effects during nested window checks. This affects everyone in the game.</div>
+            </div>
+            <div class="segmented segmented-2 toggle-control">
+              <input type="radio" id="opt-asIfRuling-chapter1" name="opt-asIfRuling" :checked="asIfRuling === 'chapter1'" @change="asIfRuling = 'chapter1'" />
+              <label for="opt-asIfRuling-chapter1">Chapter 1</label>
+              <input type="radio" id="opt-asIfRuling-chapter2" name="opt-asIfRuling" :checked="asIfRuling === 'chapter2'" @change="asIfRuling = 'chapter2'" />
+              <label for="opt-asIfRuling-chapter2">Chapter 2</label>
+            </div>
+          </div>
+
+          <div class="toggle-row" v-if="hasUltimatumsAndBoons">
+            <div class="toggle-text">
+              <div class="toggle-name">{{ $t('ultimatumsAndBoons.settingsToggleTitle') }}</div>
+              <div class="toggle-desc">{{ $t('ultimatumsAndBoons.settingsToggleDescription') }}</div>
+            </div>
+            <div class="segmented segmented-2 toggle-control">
+              <input type="radio" id="opt-ultimatumsAndBoons-on" name="opt-ultimatumsAndBoons" :checked="ultimatumsAndBoonsEnabled" @change="ultimatumsAndBoonsEnabled = true" />
+              <label for="opt-ultimatumsAndBoons-on">{{ $t('On') }}</label>
+              <input type="radio" id="opt-ultimatumsAndBoons-off" name="opt-ultimatumsAndBoons" :checked="!ultimatumsAndBoonsEnabled" @change="ultimatumsAndBoonsEnabled = false" />
+              <label for="opt-ultimatumsAndBoons-off">{{ $t('Off') }}</label>
+            </div>
+          </div>
+
           <div class="toggle-row" v-for="o in recommendedToggles" :key="o.option.tag">
             <div class="toggle-text">
               <div class="toggle-name">
@@ -325,15 +399,15 @@ onBeforeUnmount(() => {
 }
 
 .toggle-row--highlighted {
-  border-color: #FF00FF;
-  box-shadow: 0 0 0 1px #FF00FF, 0 0 12px rgba(255, 0, 255, 0.6);
+  border-color: var(--select);
+  box-shadow: 0 0 0 1px var(--select), 0 0 12px rgba(255, 0, 255, 0.6);
   animation: settingsFocusPulse 1.2s ease-out 2;
 }
 
 @keyframes settingsFocusPulse {
-  0% { box-shadow: 0 0 0 1px #FF00FF, 0 0 4px rgba(255, 0, 255, 0.3); }
-  50% { box-shadow: 0 0 0 1px #FF00FF, 0 0 18px rgba(255, 0, 255, 0.85); }
-  100% { box-shadow: 0 0 0 1px #FF00FF, 0 0 4px rgba(255, 0, 255, 0.3); }
+  0% { box-shadow: 0 0 0 1px var(--select), 0 0 4px rgba(255, 0, 255, 0.3); }
+  50% { box-shadow: 0 0 0 1px var(--select), 0 0 18px rgba(255, 0, 255, 0.85); }
+  100% { box-shadow: 0 0 0 1px var(--select), 0 0 4px rgba(255, 0, 255, 0.3); }
 }
 
 .toggle-text {

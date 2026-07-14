@@ -5,7 +5,7 @@ module Arkham.Asset where
 import Arkham.Asset.Assets
 import Arkham.Asset.Runner
 import Arkham.Card
-import Arkham.Card.PlayerCard (tabooMutated)
+import Arkham.Card.PlayerCard (tabooChained, tabooMutated)
 import Arkham.Prelude
 
 createAsset :: (HasCallStack, IsCard a) => a -> AssetId -> Asset
@@ -16,6 +16,7 @@ createAsset a aId =
           { assetCustomizations = customizations
           , assetTaboo = tabooList
           , assetMutated = mutated
+          , assetChained = chained
           }
  where
   customizations = case toCard a of
@@ -26,6 +27,9 @@ createAsset a aId =
     _ -> Nothing
   mutated = case toCard a of
     PlayerCard pc -> tabooMutated tabooList pc
+    _ -> Nothing
+  chained = case toCard a of
+    PlayerCard pc -> tabooChained tabooList pc
     _ -> Nothing
 
 lookupAsset :: HasCallStack => CardCode -> AssetId -> Maybe InvestigatorId -> CardId -> Asset
@@ -1421,6 +1425,19 @@ allAssets =
       , SomeAssetCard medicoDellaPeste
       , SomeAssetCard pantalone
       , SomeAssetCard gildedVolto
+      , -- Guardians of the Abyss
+        --- Abyssal Tribute
+        SomeAssetCard johnAndJessieBurke
+      , SomeAssetCard ancientAnkh
+      , --- Abyssal Gifts
+        SomeAssetCard khopeshOfTheAbyss
+      , SomeAssetCard summonedNightgaunt
+      , -- War of the Outer Gods
+        SomeAssetCard cloakOfTheOuterRealm
+      , SomeAssetCard pocketPortal
+      , SomeAssetCard dreadedEnd
+      , SomeAssetCard bladeOfArkat
+      , SomeAssetCard enchantedSkull
       , -- Murder at the Excelsior Hotel
         --- story [hotel]
         SomeAssetCard bloodstainedDagger
@@ -1590,4 +1607,69 @@ allAssets =
       , SomeAssetCard longbow3
       , -- Misc
         SomeAssetCard courage
+      , -- Mi-Go Incursion
+        SomeAssetCard universityChemist
+      , SomeAssetCard meteoriteSample
+      , SomeAssetCard theMilitarysPlan
+      , SomeAssetCard universalSolvent
+      , SomeAssetCard petOozeling
+      , SomeAssetCard miGoWeapon
+      , SomeAssetCard ltWilsonStewart
+      , -- The Labyrinths of Lunacy
+        SomeAssetCard eixodolonsNote
+      , SomeAssetCard keyOfMysteries
+      , SomeAssetCard mysteriousSyringe
+      , SomeAssetCard rotDiagram
+      , SomeAssetCard hungerDiagram
+      , SomeAssetCard decayDiagram
+      , -- Machinations Through Time
+        SomeAssetCard thomasCorriganPast
+      , SomeAssetCard maryZielinskiPast
+      , SomeAssetCard nikolaTesla
+      , SomeAssetCard thomasCorriganPresent
+      , SomeAssetCard maryZielinskiPresent
+      , SomeAssetCard ezraGraves
+      , SomeAssetCard thomasCorriganFuture
+      , SomeAssetCard maryZielinskiFuture
+      , SomeAssetCard dimensionalBeamMachine
+      , SomeAssetCard edwinBennetAstuteAssociate
+      , -- Relics of the Past
+        SomeAssetCard jadeCrocodile
+      , SomeAssetCard obsidianJaguar
+      , SomeAssetCard citrineSnake
+      , SomeAssetCard turquoiseEagle
+      , -- Red Tide Rising
+        SomeAssetCard mysteriousPhoto
+      , SomeAssetCard mysteriousPhotoBack
+      , --- The Drowned City
+        SomeAssetCard rubyStandish
+      , SomeAssetCard andyVanNortwick
+      , SomeAssetCard walkInFaith
+      , SomeAssetCard toeTheLine
+      , SomeAssetCard noPlaceLikeHome
+      , SomeAssetCard goodMoney
+      , SomeAssetCard doNoHarm
+      , SomeAssetCard proveYourWorth
+      , SomeAssetCard dreamsOfDestruction
+      , SomeAssetCard plumbTheDepths
+      , SomeAssetCard noPlaceLikeHomeCompleted
+      , SomeAssetCard walkInFaithCompleted
+      , SomeAssetCard toeTheLineCompleted
+      , SomeAssetCard goodMoneyCompleted
+      , SomeAssetCard proveYourWorthCompleted
+      , SomeAssetCard doNoHarmCompleted
+      , SomeAssetCard dreamsOfDestructionCompleted
+      , SomeAssetCard plumbTheDepthsCompleted
+      , SomeAssetCard obsidianRelic
+      , SomeAssetCard barrierNode
+      , SomeAssetCard mariaRivera
+      , SomeAssetCard ancientRelic
+      , SomeAssetCard grislyMask
+      , SomeAssetCard tidalTablet
+      , SomeAssetCard shardOfYchlecht
+      , SomeAssetCard skyRelic
+      , SomeAssetCard obsidianClaw
+      , SomeAssetCard obsidianClawPower
+      , SomeAssetCard johnRaymondLegrasse
+      , SomeAssetCard horrorInClay
       ]

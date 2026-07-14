@@ -4,6 +4,7 @@ import Arkham.Ability
 import Arkham.Enemy.Cards qualified as Cards
 import Arkham.Enemy.Import.Lifted
 import Arkham.Helpers.Modifiers (ModifierType (..), modifySelf)
+import Arkham.Location.Grid
 import Arkham.Matcher
 import Arkham.Scenarios.TheLongestNight.Helpers (pattern IgnoreTraps)
 
@@ -12,7 +13,9 @@ newtype EquineHybridB = EquineHybridB EnemyAttrs
   deriving newtype (Show, Eq, ToJSON, FromJSON, Entity)
 
 equineHybridB :: EnemyCard EquineHybridB
-equineHybridB = enemy EquineHybridB Cards.equineHybridB (2, Static 3, 2) (2, 0)
+equineHybridB =
+  enemy EquineHybridB Cards.equineHybridB
+    & setSpawnAt (LocationInPosition $ Pos 2 0)
 
 instance HasModifiersFor EquineHybridB where
   getModifiersFor (EquineHybridB a) =
@@ -23,7 +26,7 @@ instance HasAbilities EquineHybridB where
     extend1 a
       $ mkAbility a 1
       $ forced
-      $ EnemyTakeDamage #when AnyDamageEffect (be a) AnyValue AnySource
+      $ EnemyTakeDamage #when AnyDamageEffect (be a) (atLeast 2) AnySource
 
 instance RunMessage EquineHybridB where
   runMessage msg e@(EquineHybridB attrs) = runQueueT $ case msg of

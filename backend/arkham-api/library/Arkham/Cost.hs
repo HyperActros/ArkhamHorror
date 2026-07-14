@@ -70,6 +70,7 @@ data Payment
   | RemovePayment [Target]
   | ExilePayment [Target]
   | UsesPayment Int
+  | SpendTokenPayment Token Target
   | HorrorPayment Int
   | DamagePayment Int
   | DirectDamagePayment Int
@@ -105,6 +106,7 @@ data Cost
   | DiscoveredCluesCost
   | GroupResourceCost GameValue LocationMatcher
   | GroupDiscardCost GameValue ExtendedCardMatcher LocationMatcher
+  | GroupSkillIconCost Int (Set SkillIcon) LocationMatcher
   | GroupClueCost GameValue LocationMatcher
   | SameLocationGroupClueCost GameValue LocationMatcher
   | GroupClueCostRange (Int, Int) LocationMatcher
@@ -159,6 +161,7 @@ data Cost
   | ScenarioResourceCost Int
   | ResourceCost Int
   | CalculatedResourceCost GameCalculation
+  | CalculatedClueCost GameCalculation
   | CalculatedHandDiscardCost GameCalculation ExtendedCardMatcher
   | FieldResourceCost FieldCost
   | MaybeFieldResourceCost MaybeFieldCost
@@ -327,6 +330,9 @@ totalActionCost = sumOf (cosmos . _ActionCost)
 
 totalResourcePayment :: Payment -> Int
 totalResourcePayment = sumOf (cosmos . _ResourcePayment)
+
+paymentTargets :: Payment -> [Target]
+paymentTargets = toListOf (cosmos . _SpendTokenPayment . _2)
 
 totalCluePayment :: Payment -> Int
 totalCluePayment = sumOf (cosmos . _CluePayment . _2)

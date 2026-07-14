@@ -12,7 +12,7 @@ newtype Nahab = Nahab EnemyAttrs
   deriving newtype (Show, Eq, ToJSON, FromJSON, Entity)
 
 nahab :: EnemyCard Nahab
-nahab = enemy Nahab Cards.nahab (1, PerPlayer 1, 3) (1, 2)
+nahab = enemy Nahab Cards.nahab
 
 -- Do not remove doom from Nahab when the agenda advances.
 instance HasModifiersFor Nahab where
@@ -23,7 +23,7 @@ instance HasModifiersFor Nahab where
 instance HasAbilities Nahab where
   getAbilities (Nahab a) =
     extend1 a
-      $ restricted a 1 (thisExists a $ InPlayEnemy ReadyEnemy)
+      $ restricted a 1 (thisExists a $ ReadyEnemy)
       $ forced
       $ PhaseBegins #after #enemy
 

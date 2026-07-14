@@ -178,6 +178,9 @@ data App = App
   , appHttpManager :: Manager
   , appLogger :: Logger
   , appGameRooms :: !(MVar (Map ArkhamGameId Room))
+  , appEventRooms :: !(MVar (Map ArkhamEpicEventId Room))
+  -- ^ Epic Multiplayer: per-event websocket rooms (organizer dashboard feed),
+  -- sibling of 'appGameRooms'.
   , appBugsnag :: Bugsnag.Settings
   , appTracer :: Trace.Tracer
   }
@@ -297,7 +300,9 @@ instance Yesod App where
   makeLogger = pure . appLogger
 
   maximumContentLength :: App -> Maybe (Route App) -> Maybe Word64
-  maximumContentLength _ _ = Just $ 200 * 1024 * 1024
+  maximumContentLength app _
+    | appReloadTemplates (appSettings app) = Nothing
+    | otherwise = Just $ 200 * 1024 * 1024
 
 class Monad m => CanRunDB m where
   runDB :: SqlPersistT m a -> m a

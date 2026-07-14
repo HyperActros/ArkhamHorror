@@ -9,33 +9,76 @@ const props = withDefaults(defineProps<{ cards: Arkham.CardDef[], attachments?: 
   showCounts: true,
 })
 
-const groupedCards = computed(() => {
-  return props.cards.reduce<Array<{ card: Arkham.CardDef; count: number }>>((acc, card) => {
-    const existing = acc.find((entry) => entry.card.art === card.art)
+const ungroupedWarOfTheOuterGodsCards = new Set(['c86038a', 'c86044a', 'c86049a'])
+
+const groupKey = (card: Arkham.CardDef) => ungroupedWarOfTheOuterGodsCards.has(card.cardCode) ? card.cardCode : card.art
+
+const groupCards = (cards: Arkham.CardDef[]) => {
+  const grouped = new Map<string, { card: Arkham.CardDef; count: number }>()
+
+  for (const card of cards) {
+    const key = groupKey(card)
+    const existing = grouped.get(key)
     if (existing) existing.count += 1
-    else acc.push({ card, count: 1 })
-    return acc
-  }, [])
-})
+    else grouped.set(key, { card, count: 1 })
+  }
+
+  return Array.from(grouped.values())
+}
+
+const groupedCards = computed(() => groupCards(props.cards))
 
 const attachedCards = (card: Arkham.CardDef) => props.attachments[card.art] ?? []
 
-const groupedAttachedCards = (card: Arkham.CardDef) => {
-  return attachedCards(card).reduce<Array<{ card: Arkham.CardDef; count: number }>>((acc, attached) => {
-    const existing = acc.find((entry) => entry.card.art === attached.art)
-    if (existing) existing.count += 1
-    else acc.push({ card: attached, count: 1 })
-    return acc
-  }, [])
-}
+const groupedAttachedCards = (card: Arkham.CardDef) => groupCards(attachedCards(card))
 
 const underworldMarketCards = () => props.attachments['09077'] ?? []
+const spiritDeckCards = () => props.attachments['90052'] ?? []
+const stickToThePlanCards = () => props.attachments['03264'] ?? []
+const ancestralKnowledgeCards = () => props.attachments['07303'] ?? []
+const bewitchingCards = () => props.attachments['10079'] ?? []
+const eldritchBrandCards = () => props.attachments['11080'] ?? []
 
-const marketCardCount = (card: Arkham.CardDef) => underworldMarketCards().filter((c) => c.art === card.art).length
+const countCards = (cards: Arkham.CardDef[]) => {
+  const counts = new Map<string, number>()
+  for (const card of cards) counts.set(card.art, (counts.get(card.art) ?? 0) + 1)
+  return counts
+}
+
+const marketCardCounts = computed(() => countCards(underworldMarketCards()))
+const spiritCardCounts = computed(() => countCards(spiritDeckCards()))
+const stickToThePlanCardCounts = computed(() => countCards(stickToThePlanCards()))
+const ancestralKnowledgeCardCounts = computed(() => countCards(ancestralKnowledgeCards()))
+const bewitchingCardCounts = computed(() => countCards(bewitchingCards()))
+const eldritchBrandCardCounts = computed(() => countCards(eldritchBrandCards()))
+
+const marketCardCount = (card: Arkham.CardDef) => marketCardCounts.value.get(card.art) ?? 0
+const spiritCardCount = (card: Arkham.CardDef) => spiritCardCounts.value.get(card.art) ?? 0
+const stickToThePlanCardCount = (card: Arkham.CardDef) => stickToThePlanCardCounts.value.get(card.art) ?? 0
+const ancestralKnowledgeCardCount = (card: Arkham.CardDef) => ancestralKnowledgeCardCounts.value.get(card.art) ?? 0
+const bewitchingCardCount = (card: Arkham.CardDef) => bewitchingCardCounts.value.get(card.art) ?? 0
+const eldritchBrandCardCount = (card: Arkham.CardDef) => eldritchBrandCardCounts.value.get(card.art) ?? 0
 
 const marketTooltip = (card: Arkham.CardDef) => `Attached to Market deck (x ${marketCardCount(card)})`
+const spiritTooltip = (card: Arkham.CardDef) => `In Spirit deck (x ${spiritCardCount(card)})`
+const stickToThePlanTooltip = (card: Arkham.CardDef) => `Attached to Stick to the Plan (x ${stickToThePlanCardCount(card)})`
+const ancestralKnowledgeTooltip = (card: Arkham.CardDef) => `Attached to Ancestral Knowledge (x ${ancestralKnowledgeCardCount(card)})`
+const bewitchingTooltip = (card: Arkham.CardDef) => `Attached to Bewitching (x ${bewitchingCardCount(card)})`
+const eldritchBrandTooltip = (card: Arkham.CardDef) => `Branded by Eldritch Brand (x ${eldritchBrandCardCount(card)})`
 
 const isUnderworldMarketCard = (card: Arkham.CardDef) => marketCardCount(card) > 0
+const isSpiritDeckCard = (card: Arkham.CardDef) => spiritCardCount(card) > 0
+const isStickToThePlanCard = (card: Arkham.CardDef) => stickToThePlanCardCount(card) > 0
+const isAncestralKnowledgeCard = (card: Arkham.CardDef) => ancestralKnowledgeCardCount(card) > 0
+const isBewitchingCard = (card: Arkham.CardDef) => bewitchingCardCount(card) > 0
+const isEldritchBrandCard = (card: Arkham.CardDef) => eldritchBrandCardCount(card) > 0
+
+const attachmentTitle = (card: Arkham.CardDef) => {
+  if (card.art === '90052') return 'Spirit deck'
+  if (card.art === '09077') return 'Underworld Market'
+  if (card.art === '11080') return 'Eldritch Brand'
+  return 'Attached cards'
+}
 
 const cardName = (card: Arkham.CardDef) => {
   const subtitle = card.name.subtitle === null ? "" : `: ${card.name.subtitle}`
@@ -47,7 +90,7 @@ const cardName = (card: Arkham.CardDef) => {
   <div class="cards">
     <div
       v-for="{ card, count } in groupedCards"
-      :key="card.art"
+      :key="groupKey(card)"
       class="card-tile"
       :class="{ 'has-attachments': attachedCards(card).length > 0 }"
     >
@@ -59,14 +102,36 @@ const cardName = (card: Arkham.CardDef) => {
             <font-awesome-icon icon="store" />
             <span>x {{ marketCardCount(card) }}</span>
           </span>
+          <span v-if="isStickToThePlanCard(card)" class="market-badge" v-tooltip="stickToThePlanTooltip(card)" :aria-label="stickToThePlanTooltip(card)">
+            <font-awesome-icon icon="paperclip" />
+            <span>x {{ stickToThePlanCardCount(card) }}</span>
+          </span>
+          <span v-if="isAncestralKnowledgeCard(card)" class="market-badge" v-tooltip="ancestralKnowledgeTooltip(card)" :aria-label="ancestralKnowledgeTooltip(card)">
+            <font-awesome-icon icon="paperclip" />
+            <span>x {{ ancestralKnowledgeCardCount(card) }}</span>
+          </span>
+          <span v-if="isBewitchingCard(card)" class="market-badge" v-tooltip="bewitchingTooltip(card)" :aria-label="bewitchingTooltip(card)">
+            <font-awesome-icon icon="paperclip" />
+            <span>x {{ bewitchingCardCount(card) }}</span>
+          </span>
+          <span v-if="isEldritchBrandCard(card)" class="market-badge" v-tooltip="eldritchBrandTooltip(card)" :aria-label="eldritchBrandTooltip(card)">
+            <font-awesome-icon icon="book" />
+            <span>x {{ eldritchBrandCardCount(card) }}</span>
+          </span>
+          <span v-if="isSpiritDeckCard(card)" class="spirit-badge" v-tooltip="spiritTooltip(card)" :aria-label="spiritTooltip(card)">
+            <font-awesome-icon :icon="['fas', 'ghost']" />
+            <span>x {{ spiritCardCount(card) }}</span>
+          </span>
         </span>
       </a>
       <div v-if="attachedCards(card).length > 0" class="attachments-panel">
-        <div class="attachments-title"><font-awesome-icon icon="paperclip" /> Attached cards</div>
+        <div class="attachments-title" :class="{ 'attachments-title--spirit': card.art === '90052' }">
+          <font-awesome-icon :icon="card.art === '90052' ? ['fas', 'ghost'] : 'paperclip'" /> {{ attachmentTitle(card) }}
+        </div>
         <div class="attachment-grid">
           <a
             v-for="entry in groupedAttachedCards(card)"
-            :key="entry.card.art"
+            :key="groupKey(entry.card)"
             class="attachment-card"
             target="_blank"
             :href="`${localizeArkhamDBBaseUrl()}/card/${entry.card.art}`"
@@ -74,8 +139,8 @@ const cardName = (card: Arkham.CardDef) => {
           >
             <CardImage :card="entry.card" />
             <span class="attachment-label">
-              <span class="attachment-name">{{ cardName(entry.card) }}</span>
-              <span class="attachment-count">x {{ entry.count }}</span>
+              <span class="attachment-name">{{ cardName(entry.card) }}{{ card.art === '11080' ? ' was branded' : '' }}</span>
+              <span v-if="card.art !== '11080' || entry.count > 1" class="attachment-count">x {{ entry.count }}</span>
             </span>
           </a>
         </div>
@@ -119,7 +184,7 @@ const cardName = (card: Arkham.CardDef) => {
   position: absolute;
   left: 10px;
   bottom: 10px;
-  z-index: 1;
+  z-index: var(--z-index-1);
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -141,7 +206,8 @@ const cardName = (card: Arkham.CardDef) => {
   white-space: nowrap;
 }
 
-.market-badge {
+.market-badge,
+.spirit-badge {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -156,6 +222,11 @@ const cardName = (card: Arkham.CardDef) => {
   box-shadow: 0 2px 7px rgba(0, 0, 0, 0.45);
   font-size: 0.82rem;
   font-weight: 800;
+}
+
+.spirit-badge {
+  color: #b8d7ff;
+  border-color: rgba(120, 170, 255, 0.5);
 }
 
 .has-attachments {
@@ -191,6 +262,10 @@ const cardName = (card: Arkham.CardDef) => {
   font-weight: 900;
   letter-spacing: 0.08em;
   text-transform: uppercase;
+}
+
+.attachments-title--spirit {
+  color: #b8d7ff;
 }
 
 .attachment-grid {

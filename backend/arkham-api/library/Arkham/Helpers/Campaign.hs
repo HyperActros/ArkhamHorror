@@ -8,11 +8,11 @@ import Arkham.Classes.Query
 import {-# SOURCE #-} Arkham.Game ()
 import Arkham.Helpers
 import Arkham.Helpers.Scenario
+import Arkham.I18n
 import Arkham.Id
 import Arkham.Investigator.Types (Field (..))
 import Arkham.Matcher
 import Arkham.Message
-import Arkham.Name
 import Arkham.Prelude
 import Arkham.Projection
 import Arkham.Scenario.Types (Field (..))
@@ -115,19 +115,32 @@ addCampaignCardToDeckChoice leadPlayer investigators shouldShuffleIn card =
 addCampaignCardToDeckChoiceWith
   :: PlayerId -> [InvestigatorId] -> ShuffleIn -> Card -> (InvestigatorId -> [Message]) -> Message
 addCampaignCardToDeckChoiceWith leadPlayer investigators shouldShuffleIn card f =
-  questionLabelWithCard ("Add " <> display card.name <> " to a deck") card.cardCode leadPlayer
+  addCampaignCardToDeckChoiceWhenDeclined leadPlayer investigators shouldShuffleIn card f []
+
+-- | Like 'addCampaignCardToDeckChoiceWith', but with messages to run when the
+-- players decline the card (e.g. the "I Don't Trust Her" achievement).
+addCampaignCardToDeckChoiceWhenDeclined
+  :: PlayerId
+  -> [InvestigatorId]
+  -> ShuffleIn
+  -> Card
+  -> (InvestigatorId -> [Message])
+  -> [Message]
+  -> Message
+addCampaignCardToDeckChoiceWhenDeclined leadPlayer investigators shouldShuffleIn card f declined = withI18n do
+  questionLabelWithCard (cardNameVar card $ ikey' "label.addCardToDeck") card.cardCode leadPlayer
     $ ChooseOne
     $ [ PortraitLabel investigator $ AddCampaignCardToDeck investigator shouldShuffleIn card
           : f investigator
       | investigator <- investigators
       ]
-    <> [Label ("Do not add " <> display card.name <> " to any deck") []]
+    <> [Label (cardNameVar card $ ikey' "label.doNotAddCardToDeck") declined]
 
 forceAddCampaignCardToDeckChoice
   :: PlayerId -> [InvestigatorId] -> ShuffleIn -> Card -> Message
 forceAddCampaignCardToDeckChoice _ [onlyId] shouldShuffleIn card = AddCampaignCardToDeck onlyId shouldShuffleIn card
-forceAddCampaignCardToDeckChoice leadPlayer investigators shouldShuffleIn card =
-  questionLabelWithCard ("Add " <> display card.name <> " to a deck") card.cardCode leadPlayer
+forceAddCampaignCardToDeckChoice leadPlayer investigators shouldShuffleIn card = withI18n do
+  questionLabelWithCard (cardNameVar card $ ikey' "label.addCardToDeck") card.cardCode leadPlayer
     $ ChooseOne
       [ PortraitLabel investigator [AddCampaignCardToDeck investigator shouldShuffleIn card]
       | investigator <- investigators

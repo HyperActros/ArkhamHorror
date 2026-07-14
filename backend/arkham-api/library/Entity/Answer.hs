@@ -43,8 +43,20 @@ data Answer
   | CampaignSettingsAnswer CampaignSettings
   | DeckAnswer {deckId :: ArkhamDeckId, playerId :: PlayerId}
   | DeckListAnswer {deckList :: ArkhamDBDecklist, playerId :: PlayerId}
+  | -- | Trigger for the server to answer this seat's parked question via the AI
+    -- decision engine. Wire shape: @{ "tag": "AiAnswer", "playerId": <uuid> }@.
+    -- Resolved in 'Api.Handler.Arkham.Games.Shared.updateGame'; see the
+    -- 'handleAnswerPure' note below for why it is not handled here.
+    AiAnswer {playerId :: PlayerId}
+  | -- | Trigger for the server to commit a single card from this seat's parked
+    -- /assist/ skill-test window (another investigator is performing the test)
+    -- via the AI decision engine. Wire shape:
+    -- @{ "tag": "AiAssist", "playerId": <uuid> }@. Resolved in
+    -- 'Api.Handler.Arkham.Games.Shared.updateGame' (see 'handleAnswerPure').
+    AiAssist {playerId :: PlayerId}
   | PickDestinyAnswer [DestinyDrawing]
   | CampaignSpecificAnswer Text Value
+  | ScenarioSpecificAnswer Text Value
   | ExchangeAmountsAnswer
       { source :: Source
       , fromInvestigator :: InvestigatorId
@@ -294,8 +306,11 @@ answerPlayer = \case
   StandaloneSettingsAnswer _ -> Nothing
   CampaignSettingsAnswer _ -> Nothing
   CampaignSpecificAnswer {} -> Nothing
+  ScenarioSpecificAnswer {} -> Nothing
   DeckAnswer _ pid -> Just pid
   DeckListAnswer _ pid -> Just pid
+  AiAnswer pid -> Just pid
+  AiAssist pid -> Just pid
   PickDestinyAnswer _ -> Nothing
   ExchangeAmountsAnswer {} -> Nothing
   CampaignStepAnswer _ -> Nothing
@@ -337,6 +352,15 @@ handleAnswerPure :: Game -> PlayerId -> Answer -> IO Reply
 handleAnswerPure Game {..} playerId = \case
   DeckAnswer {} -> unhandled "DeckAnswer requires database access"
   DeckListAnswer {} -> unhandled "DeckListAnswer requires database access"
+  -- AiAnswer is resolved upstream in updateGame (it runs the AI decision
+  -- engine over the parked game and recurses with the concrete answer).
+  -- Keeping the call out of this module avoids an Entity.Answer <-> Ai.Decision
+  -- import cycle. Reaching here means no server-side AI resolution ran.
+  AiAnswer {} -> unhandled "AiAnswer must be resolved by the server (updateGame)"
+  -- AiAssist is likewise resolved upstream in updateGame (it runs the assist
+  -- decision engine over the parked game and recurses with the concrete commit
+  -- answer). Reaching here means no server-side AI resolution ran.
+  AiAssist {} -> unhandled "AiAssist must be resolved by the server (updateGame)"
   StandaloneSettingsAnswer settings' -> do
     let standaloneCampaignLog = makeStandaloneCampaignLog settings'
     handled [SetCampaignLog standaloneCampaignLog]
@@ -357,16 +381,32 @@ handleAnswerPure Game {..} playerId = \case
           $ CampaignSpecific k v
           : [AskMap question' | not (Map.null question')]
       _ -> unhandled "Wrong question type"
+  ScenarioSpecificAnswer k v -> do
+    let
+      unwrap = \case
+        QuestionLabel _ _ q' -> unwrap q'
+        PayCostQuestion _ q' -> unwrap q'
+        QuestionWithSource _ _ q' -> unwrap q'
+        q' -> q'
+    case unwrap <$> Map.lookup playerId gameQuestion of
+      Just (PickScenarioSpecific {}) -> do
+        let question' = Map.delete playerId gameQuestion
+        handled
+          $ ScenarioSpecific k v
+          : [AskMap question' | not (Map.null question')]
+      _ -> unhandled "Wrong question type"
   CampaignStepAnswer k -> do
     case gameMode of
       This c -> case c.step of
         CS.ContinueCampaignStep {} -> handled [NextCampaignStep (Just k)]
+        CS.StandaloneScenarioStep _ (CS.ContinueCampaignStep {}) -> handled [NextCampaignStep (Just k)]
         _ -> handled []
       These c s -> case s.step of
         Just (CS.ContinueCampaignStep {}) -> handled [NextScenarioCampaignStep (Just k)]
         Just (CS.ScenarioStepWithOptions {}) -> handled [ScenarioCampaignStep k.normalize]
         _ -> case c.step of
           CS.ContinueCampaignStep {} -> handled [NextCampaignStep (Just k)]
+          CS.StandaloneScenarioStep _ (CS.ContinueCampaignStep {}) -> handled [NextCampaignStep (Just k)]
           _ -> handled []
       That s -> case s.step of
         Just (CS.ContinueCampaignStep {}) -> handled [NextScenarioCampaignStep (Just k)]
@@ -441,6 +481,7 @@ handleAnswerPure Game {..} playerId = \case
         -- skip the stale AskMap so it doesn't clobber the regenerated one.
         UpdateGlobalSetting {} | inFastWindow -> handled [message]
         UpdateCardSetting {} | inFastWindow -> handled [message]
+        SetAsIfRuling {} | inFastWindow -> handled [message]
         _ -> handled [message, AskMap gameQuestion]
       else handled [message]
   Answer response ->

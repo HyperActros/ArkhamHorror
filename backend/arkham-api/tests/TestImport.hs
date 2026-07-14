@@ -71,6 +71,7 @@ import Arkham.Enemy.Cards qualified as Cards
 import Arkham.Enemy.Types
 import Arkham.Entities qualified as Entities
 import Arkham.Event.Types
+import Arkham.Epic.Types (HasMaybeEpic (..))
 import Arkham.Game qualified as Game
 import Arkham.Game.Settings
 import Arkham.Game.State
@@ -256,6 +257,9 @@ instance CardGen TestAppT where
 
 runTestApp :: TestApp -> TestAppT a -> IO a
 runTestApp testApp = flip evalStateT testApp . unTestAppT
+
+instance HasMaybeEpic TestApp where
+  getMaybeEpicEnv _ = Nothing
 
 instance HasGameRef TestApp where
   gameRefL = lens game $ \m x -> m {game = x}
@@ -582,7 +586,13 @@ addInvestigator
 addInvestigator defF = do
   investigator' <- testInvestigator defF
   env <- get
-  runReaderT (overGame (entitiesL . Entities.investigatorsL %~ insertEntity investigator')) env
+  runReaderT
+    ( overGame
+        ( (entitiesL . Entities.investigatorsL %~ insertEntity investigator')
+            . (playerOrderL %~ (<> [toId investigator']))
+        )
+    )
+    env
   pure investigator'
 
 testConnectedLocations
@@ -636,10 +646,13 @@ createMessageChecker :: (Message -> Bool) -> TestAppT (IORef Bool)
 createMessageChecker f = do
   ref <- liftIO $ newIORef False
   testApp <- get
+  -- Chain rather than replace, so several checkers can watch the same game.
+  let prev = testLogger testApp
   put
     $ testApp
-      { testLogger =
-          Just (\msg -> when (f msg) (liftIO $ atomicWriteIORef ref True))
+      { testLogger = Just \msg -> do
+          for_ prev ($ msg)
+          when (f msg) (liftIO $ atomicWriteIORef ref True)
       }
   pure ref
 
@@ -696,11 +709,20 @@ skip = chooseOptionMatching "skip" \case
   SkipTriggersButton {} -> True
   _ -> False
 
+-- | Peel off display-only question wrappers (source highlight, header label)
+-- that the frontend renders but that tests should see through.
+stripQuestionWrappers :: Question msg -> Question msg
+stripQuestionWrappers = \case
+  QuestionLabel _ _ q -> stripQuestionWrappers q
+  QuestionWithSource _ _ q -> stripQuestionWrappers q
+  PayCostQuestion _ q -> stripQuestionWrappers q
+  q -> q
+
 chooseOnlyOption :: HasCallStack => String -> TestAppT ()
 chooseOnlyOption _reason = do
   questionMap <- gameQuestion <$> getGame
   case mapToList questionMap of
-    [(_, question)] -> case question of
+    [(_, question)] -> case stripQuestionWrappers question of
       ChooseOne [msg] -> push (uiToRun msg) <* runMessages
       PlayerWindowChooseOne [msg] -> push (uiToRun msg) <* runMessages
       ChooseOneAtATime [msg] -> push (uiToRun msg) <* runMessages
@@ -713,7 +735,7 @@ chooseFirstOption :: HasCallStack => String -> TestAppT ()
 chooseFirstOption _reason = do
   questionMap <- gameQuestion <$> getGame
   case mapToList questionMap of
-    [(_, question)] -> case question of
+    [(_, question)] -> case stripQuestionWrappers question of
       ChooseOne (msg : _) -> push (uiToRun msg) >> runMessages
       PlayerWindowChooseOne (msg : _) -> push (uiToRun msg) >> runMessages
       ChooseOneAtATime (msg : _) -> push (uiToRun msg) >> runMessages
@@ -737,6 +759,8 @@ chooseOptionMatching _reason f = do
     liftIO $ expectationFailure $ "could not find a matching message in: " <> show msgs
   go iid question = case question of
     QuestionLabel _ _ q -> go iid q
+    QuestionWithSource _ _ q -> go iid q
+    PayCostQuestion _ q -> go iid q
     ChooseOne msgs -> case find f msgs of
       Just msg -> push (uiToRun msg) <* runMessages
       Nothing -> notFound msgs
@@ -752,6 +776,14 @@ chooseOptionMatching _reason f = do
     ChooseN n msgs -> case find f msgs of
       Just msg -> do
         pushWhen (n > 1) (Ask iid $ ChooseN (n - 1) $ deleteFirst msg msgs)
+        push (uiToRun msg)
+        runMessages
+      Nothing -> notFound msgs
+    ChooseUpToN n msgs -> case find f msgs of
+      Just msg -> do
+        case msg of
+          Done _ -> pure ()
+          _ -> pushWhen (n > 1) (Ask iid $ ChooseUpToN (n - 1) $ deleteFirst msg msgs)
         push (uiToRun msg)
         runMessages
       Nothing -> notFound msgs
@@ -840,9 +872,21 @@ mkTestTracer = do
   pure $ makeTracer tp instrLib tracerOptions
 
 scenarioTest :: ScenarioId -> (Investigator -> TestAppT ()) -> IO ()
-scenarioTest scenarioId body = do
-  investigator <- testInvestigator Investigators.jennyBarnes
-  let scenario' = lookupScenario scenarioId Easy
+scenarioTest = scenarioTestWith Investigators.jennyBarnes
+
+-- | Like 'scenarioTest' but lets the caller choose which investigator the game
+-- is seeded with (rather than the default Jenny Barnes).
+scenarioTestWith :: CardDef -> ScenarioId -> (Investigator -> TestAppT ()) -> IO ()
+scenarioTestWith investigatorDef = scenarioTestWithDifficulty investigatorDef Easy
+
+-- | Like 'scenarioTestWith' but also lets the caller choose the difficulty
+-- (needed for effects that differ between the Easy/Standard and Hard/Expert
+-- sides of a scenario reference card).
+scenarioTestWithDifficulty
+  :: CardDef -> Difficulty -> ScenarioId -> (Investigator -> TestAppT ()) -> IO ()
+scenarioTestWithDifficulty investigatorDef difficulty scenarioId body = do
+  investigator <- testInvestigator investigatorDef
+  let scenario' = lookupScenario scenarioId difficulty
   g <- newGame scenario' investigator
   gameRef <- newIORef g
   queueRef <- newQueue []
@@ -861,6 +905,9 @@ newGame scenario' investigator = do
       Game
         { gameWindowDepth = 0
         , gameWindowStack = Nothing
+        , gameWindowTick = 0
+        , gameWindowTickStack = []
+        , gameEntryTicks = mempty
         , gameRunWindows = True
         , gameDepthLock = 0
         , gamePhaseHistory = mempty
@@ -893,6 +940,7 @@ newGame scenario' investigator = do
         , gameGameState = IsActive
         , gameFoundCards = mempty
         , gameFocusedCards = mempty
+        , gameHighlightedCards = mempty
         , gameFocusedTarotCards = mempty
         , gameFocusedChaosTokens = mempty
         , gameActiveCard = Nothing
@@ -903,6 +951,7 @@ newGame scenario' investigator = do
         , gameQuestion = mempty
         , gameActionCanBeUndone = False
         , gameActionDiff = []
+        , gameActionSnapshot = Transient Nothing
         , gameInAction = False
         , gameCards = mempty
         , gameActiveCost = mempty
